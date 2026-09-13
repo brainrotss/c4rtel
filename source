@@ -1,0 +1,3628 @@
+--[[
+    PRISM — v25
+    CHUNK 1A — Theme, Config, Helpers, UI Root, Spawn + Look tab GUIs
+    Made by brainrottinbattles
+]]
+
+do
+
+-- ============================================
+-- ACCESS CONTROL TEST
+-- ============================================
+local ALLOWED_USERIDS = {
+    [10772473758] = true,  -- FAKE ID — you should get blocked
+}
+
+local myId = game:GetService("Players").LocalPlayer.UserId
+if not ALLOWED_USERIDS[myId] then
+    warn("[C4RTEL] Access denied. Your UserId:", myId)
+    return
+end
+print("[C4RTEL] Access granted. UserId:", myId)
+-- ============================================
+
+local Players            = game:GetService("Players")
+local ReplicatedStorage  = game:GetService("ReplicatedStorage")
+local UserInputService   = game:GetService("UserInputService")
+local RunService         = game:GetService("RunService")
+local TweenService       = game:GetService("TweenService")
+local HttpService        = game:GetService("HttpService")
+
+local player = Players.LocalPlayer
+local mouse  = player:GetMouse()
+
+local Theme = {
+    BG            = Color3.fromRGB(14, 14, 18),
+    BG_TRANSP     = 0.1,
+    SURFACE       = Color3.fromRGB(24, 24, 30),
+    SURFACE_ALT   = Color3.fromRGB(34, 34, 42),
+    SURFACE_HOVER = Color3.fromRGB(46, 46, 58),
+    ACCENT        = Color3.fromRGB(120, 140, 255),
+    ACCENT_DARK   = Color3.fromRGB(80, 95, 190),
+    SUCCESS       = Color3.fromRGB(96, 200, 128),
+    DANGER        = Color3.fromRGB(224, 92, 92),
+    WARNING       = Color3.fromRGB(230, 175, 80),
+    INFO          = Color3.fromRGB(120, 190, 255),
+    TEXT          = Color3.fromRGB(240, 240, 245),
+    TEXT_DIM      = Color3.fromRGB(160, 160, 175),
+    TEXT_MUTED    = Color3.fromRGB(110, 110, 125),
+    CORNER        = UDim.new(0, 8),
+    CORNER_SM     = UDim.new(0, 6),
+    FONT_BOLD     = Enum.Font.GothamBold,
+    FONT          = Enum.Font.Gotham,
+    FONT_MONO     = Enum.Font.Code,
+}
+
+local themeBindings = {}
+_G.Prism_themeBindings = themeBindings
+
+local function bindTheme(instance, prop, themeKey)
+    table.insert(themeBindings, { instance = instance, prop = prop, key = themeKey })
+end
+
+local SIDEBAR_W = 220
+local PANEL_W   = 400
+local WINDOW_H  = 560
+local TOP_TAB_W = 620
+
+local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
+
+local function getRemote(name)
+    if not Remotes then return nil end
+    return Remotes:FindFirstChild(name)
+end
+
+local function fireRemote(remote, ...)
+    if not remote then return false, "Remote missing" end
+    local args = table.pack(...)
+    if remote:IsA("RemoteEvent") then
+        return pcall(function() remote:FireServer(table.unpack(args, 1, args.n)) end)
+    elseif remote:IsA("RemoteFunction") then
+        return pcall(function() return remote:InvokeServer(table.unpack(args, 1, args.n)) end)
+    end
+    return false, "Unknown class"
+end
+
+local OfficeAction = getRemote("OfficeCustomizationAction")
+local SetSkinTone  = getRemote("SetSkinTone")
+local SubmitRPName = getRemote("SubmitRPNameSelection")
+local SetFace      = getRemote("SetFace")
+local UpdateRole   = getRemote("UpdatePlayerRole")
+
+local RPNameConfig
+pcall(function()
+    RPNameConfig = require(ReplicatedStorage:WaitForChild("RPNameConfig", 3))
+end)
+
+local CONFIG_FILE = "prism_config.json"
+
+local function colorToTable(c)
+    return { R = math.floor(c.R * 255 + 0.5), G = math.floor(c.G * 255 + 0.5), B = math.floor(c.B * 255 + 0.5) }
+end
+
+local function tableToColor(t)
+    return Color3.fromRGB(t.R or 0, t.G or 0, t.B or 0)
+end
+
+local main
+
+local function saveConfig(extra)
+    if not writefile then return end
+    local cfg = {
+        theme = {
+            BG          = colorToTable(Theme.BG),
+            SURFACE     = colorToTable(Theme.SURFACE),
+            SURFACE_ALT = colorToTable(Theme.SURFACE_ALT),
+            ACCENT      = colorToTable(Theme.ACCENT),
+            ACCENT_DARK = colorToTable(Theme.ACCENT_DARK),
+            TEXT        = colorToTable(Theme.TEXT),
+            TEXT_DIM    = colorToTable(Theme.TEXT_DIM),
+        },
+        transparency = Theme.BG_TRANSP,
+        window = {
+            X = main and main.AbsolutePosition.X or nil,
+            Y = main and main.AbsolutePosition.Y or nil,
+            W = main and main.AbsoluteSize.X or nil,
+            H = main and main.AbsoluteSize.Y or nil,
+        },
+    }
+    if extra then
+        for k, v in pairs(extra) do cfg[k] = v end
+    end
+    pcall(function()
+        writefile(CONFIG_FILE, HttpService:JSONEncode(cfg))
+    end)
+end
+
+local function loadConfig()
+    if not (isfile and isfile(CONFIG_FILE)) then return nil end
+    local ok, data = pcall(function()
+        return HttpService:JSONDecode(readfile(CONFIG_FILE))
+    end)
+    if ok then return data end
+    return nil
+end
+
+local savedConfig = loadConfig()
+
+local function findOfficeZone()
+    local shells = workspace:FindFirstChild("OfficeShellsNEW")
+    if not shells then return nil end
+    for _, dept in ipairs(shells:GetChildren()) do
+        if dept:IsA("Folder") then
+            for _, tier in ipairs(dept:GetChildren()) do
+                if tier:IsA("Folder") then
+                    for _, office in ipairs(tier:GetChildren()) do
+                        if office:IsA("Folder") then
+                            local z = office:FindFirstChild("OfficeZone")
+                            if z then return z end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function getFloorPart()
+    local shells = workspace:FindFirstChild("OfficeShellsNEW")
+    if not shells then return workspace end
+    for _, dept in ipairs(shells:GetChildren()) do
+        if dept:IsA("Folder") then
+            for _, tier in ipairs(dept:GetChildren()) do
+                if tier:IsA("Folder") then
+                    for _, office in ipairs(tier:GetChildren()) do
+                        if office:IsA("Folder") then
+                            local f = office:FindFirstChild("Floor")
+                            if f and f:IsA("BasePart") then return f end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return workspace
+end
+
+local zone = findOfficeZone()
+if zone then
+    zone.Anchored = false
+    RunService.Heartbeat:Connect(function()
+        local char = player.Character
+        if char then
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if hrp then zone.Position = hrp.Position end
+        end
+    end)
+end
+
+local floorPart = getFloorPart()
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "Prism"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+main = Instance.new("Frame")
+main.AnchorPoint = Vector2.new(0.5, 0)
+main.Size = UDim2.new(0, SIDEBAR_W, 0, WINDOW_H)
+main.Position = UDim2.new(0.5, 0, 0.2, 0)
+main.BackgroundColor3 = Theme.BG
+main.BackgroundTransparency = Theme.BG_TRANSP
+main.BorderSizePixel = 0
+main.Active = true
+main.ClipsDescendants = true
+main.Parent = screenGui
+Instance.new("UICorner", main).CornerRadius = UDim.new(0, 12)
+bindTheme(main, "BackgroundColor3", "BG")
+bindTheme(main, "BackgroundTransparency", "BG_TRANSP")
+
+if savedConfig then
+    if savedConfig.theme then
+        for k, v in pairs(savedConfig.theme) do
+            if type(v) == "table" and Theme[k] then
+                Theme[k] = tableToColor(v)
+            end
+        end
+    end
+    if savedConfig.transparency then
+        Theme.BG_TRANSP = savedConfig.transparency
+        main.BackgroundTransparency = savedConfig.transparency
+    end
+    if savedConfig.window and savedConfig.window.W and savedConfig.window.H then
+        main.Size = UDim2.new(0, savedConfig.window.W, 0, savedConfig.window.H)
+    end
+    if savedConfig.window and savedConfig.window.X and savedConfig.window.Y then
+        main.Position = UDim2.new(0, savedConfig.window.X + savedConfig.window.W / 2, 0, savedConfig.window.Y)
+    end
+end
+
+local function clampToScreen()
+    local cam = workspace.CurrentCamera
+    if not cam then return end
+    local vp = cam.ViewportSize
+    local pos = main.AbsolutePosition
+    local size = main.AbsoluteSize
+    local newX = pos.X
+    local newY = pos.Y
+    if newX < 0 then newX = 0
+    elseif newX + size.X > vp.X then newX = vp.X - size.X end
+    if newY < 0 then newY = 0
+    elseif newY + size.Y > vp.Y then newY = vp.Y - size.Y end
+    if newX ~= pos.X or newY ~= pos.Y then
+        main.Position = UDim2.new(0, newX + size.X / 2, 0, newY)
+    end
+end
+
+local MIN_W, MIN_H = 340, 400
+local MAX_W, MAX_H = 1200, 900
+
+local function makeResizeHandle(pos, anchor)
+    local h = Instance.new("TextButton")
+    h.Size = UDim2.new(0, 16, 0, 16)
+    h.Position = UDim2.new(pos.X, pos.Y)
+    h.AnchorPoint = anchor
+    h.BackgroundTransparency = 1
+    h.Text = ""
+    h.AutoButtonColor = false
+    h.Parent = main
+    h.ZIndex = 10
+    return h
+end
+
+local brHandle = makeResizeHandle(UDim2.new(1, 0, 1, 0), Vector2.new(1, 1))
+local tlHandle = makeResizeHandle(UDim2.new(0, 0, 0, 0), Vector2.new(0, 0))
+local trHandle = makeResizeHandle(UDim2.new(1, 0, 0, 0), Vector2.new(1, 0))
+local blHandle = makeResizeHandle(UDim2.new(0, 0, 1, 0), Vector2.new(0, 1))
+
+local function setupResize(handle, dirX, dirY)
+    local dragging = false
+    local startMouse, startSize, startPos
+
+    handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            startMouse = input.Position
+            startSize = main.AbsoluteSize
+            startPos = main.AbsolutePosition
+            main.Active = false
+        end
+    end)
+    handle.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+            main.Active = true
+            clampToScreen()
+            saveConfig()
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if not dragging then return end
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
+            local dx = input.Position.X - startMouse.X
+            local dy = input.Position.Y - startMouse.Y
+            local newW = startSize.X
+            local newH = startSize.Y
+            if dirX == 1 then newW = startSize.X + dx
+            elseif dirX == -1 then newW = startSize.X - dx end
+            if dirY == 1 then newH = startSize.Y + dy
+            elseif dirY == -1 then newH = startSize.Y - dy end
+            newW = math.clamp(newW, MIN_W, MAX_W)
+            newH = math.clamp(newH, MIN_H, MAX_H)
+            main.Size = UDim2.new(0, newW, 0, newH)
+            if dirX == -1 or dirY == -1 then
+                local deltaW = startSize.X - newW
+                local deltaH = startSize.Y - newH
+                main.Position = UDim2.new(
+                    0, startPos.X + startSize.X / 2 + (dirX == -1 and deltaW or 0),
+                    0, startPos.Y + (dirY == -1 and deltaH or 0)
+                )
+            end
+        end
+    end)
+end
+
+setupResize(brHandle, 1, 1)
+setupResize(tlHandle, -1, -1)
+setupResize(trHandle, 1, -1)
+setupResize(blHandle, -1, 1)
+
+local mainStroke = Instance.new("UIStroke")
+mainStroke.Color = Color3.fromRGB(60, 60, 78)
+mainStroke.Thickness = 1
+mainStroke.Transparency = 0.4
+mainStroke.Parent = main
+
+local header = Instance.new("Frame")
+header.Size = UDim2.new(1, 0, 0, 44)
+header.BackgroundColor3 = Theme.SURFACE
+header.BackgroundTransparency = 0.15
+header.BorderSizePixel = 0
+header.Parent = main
+Instance.new("UICorner", header).CornerRadius = UDim.new(0, 12)
+bindTheme(header, "BackgroundColor3", "SURFACE")
+
+local headerFix = Instance.new("Frame")
+headerFix.Size = UDim2.new(1, 0, 0, 12)
+headerFix.Position = UDim2.new(0, 0, 1, -12)
+headerFix.BackgroundColor3 = Theme.SURFACE
+headerFix.BackgroundTransparency = 0.15
+headerFix.BorderSizePixel = 0
+headerFix.Parent = header
+bindTheme(headerFix, "BackgroundColor3", "SURFACE")
+
+local logoEmoji = Instance.new("TextLabel")
+logoEmoji.Size = UDim2.new(0, 20, 0, 20)
+logoEmoji.Position = UDim2.new(0, 12, 0.5, -10)
+logoEmoji.BackgroundTransparency = 1
+logoEmoji.Text = "💀"  -- or "👑", "💰", "🎩", "🕴️", "⚜️"
+logoEmoji.TextSize = 14
+logoEmoji.Parent = header
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -160, 1, 0)
+title.Position = UDim2.new(0, 32, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "    C4RTEL"
+title.TextColor3 = Color3.fromRGB(255, 100, 100)  -- red
+title.Font = Theme.FONT_BOLD
+title.TextSize = 15
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = header
+bindTheme(title, "TextColor3", "TEXT")
+
+
+local layoutToggle = Instance.new("TextButton")
+layoutToggle.Size = UDim2.new(0, 28, 0, 28)
+layoutToggle.Position = UDim2.new(1, -100, 0.5, -14)
+layoutToggle.BackgroundColor3 = Theme.SURFACE_ALT
+layoutToggle.BackgroundTransparency = 0.1
+layoutToggle.Text = "⇄"
+layoutToggle.TextColor3 = Theme.ACCENT
+layoutToggle.Font = Theme.FONT_BOLD
+layoutToggle.TextSize = 14
+layoutToggle.Parent = header
+Instance.new("UICorner", layoutToggle).CornerRadius = Theme.CORNER_SM
+bindTheme(layoutToggle, "BackgroundColor3", "SURFACE_ALT")
+
+local minBtn = Instance.new("TextButton")
+minBtn.Size = UDim2.new(0, 28, 0, 28)
+minBtn.Position = UDim2.new(1, -68, 0.5, -14)
+minBtn.BackgroundColor3 = Theme.SURFACE_ALT
+minBtn.Text = "—"
+minBtn.TextColor3 = Theme.WARNING
+minBtn.Font = Theme.FONT_BOLD
+minBtn.TextSize = 16
+minBtn.Parent = header
+Instance.new("UICorner", minBtn).CornerRadius = Theme.CORNER_SM
+bindTheme(minBtn, "BackgroundColor3", "SURFACE_ALT")
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 28, 0, 28)
+closeBtn.Position = UDim2.new(1, -36, 0.5, -14)
+closeBtn.BackgroundColor3 = Theme.SURFACE_ALT
+closeBtn.Text = "✕"
+closeBtn.TextColor3 = Theme.DANGER
+closeBtn.Font = Theme.FONT_BOLD
+closeBtn.TextSize = 14
+closeBtn.Parent = header
+Instance.new("UICorner", closeBtn).CornerRadius = Theme.CORNER_SM
+bindTheme(closeBtn, "BackgroundColor3", "SURFACE_ALT")
+
+local sidebar = Instance.new("Frame")
+sidebar.Size = UDim2.new(0, SIDEBAR_W, 1, -350)
+sidebar.Position = UDim2.new(0, 0, 0, 44)
+sidebar.BackgroundTransparency = 1
+sidebar.Parent = main
+
+local sidebarLayout = Instance.new("UIListLayout")
+sidebarLayout.SortOrder = Enum.SortOrder.LayoutOrder
+sidebarLayout.Padding = UDim.new(0, 3)
+sidebarLayout.Parent = sidebar
+
+local sidebarPad = Instance.new("UIPadding")
+sidebarPad.PaddingTop = UDim.new(0, 12)
+sidebarPad.PaddingBottom = UDim.new(0, 12)
+sidebarPad.PaddingLeft = UDim.new(0, 12)
+sidebarPad.PaddingRight = UDim.new(0, 12)
+sidebarPad.Parent = sidebar
+
+local panel = Instance.new("Frame")
+panel.Size = UDim2.new(0, PANEL_W, 1, -84)
+panel.Position = UDim2.new(0, SIDEBAR_W, 0, 44)
+panel.BackgroundTransparency = 1
+panel.ClipsDescendants = true
+panel.Parent = main
+
+local panelContent = Instance.new("Frame")
+panelContent.Size = UDim2.new(1, 0, 1, 0)
+panelContent.BackgroundTransparency = 1
+panelContent.Parent = panel
+
+local topTabBar = Instance.new("Frame")
+topTabBar.Size = UDim2.new(1, -20, 0, 34)
+topTabBar.Position = UDim2.new(0, 10, 0, 50)
+topTabBar.BackgroundTransparency = 1
+topTabBar.Visible = false
+topTabBar.Parent = main
+
+local topTabLayout = Instance.new("UIListLayout")
+topTabLayout.FillDirection = Enum.FillDirection.Horizontal
+topTabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+topTabLayout.Padding = UDim.new(0, 5)
+topTabLayout.Parent = topTabBar
+
+local topTabDivider = Instance.new("Frame")
+topTabDivider.Size = UDim2.new(1, -20, 0, 1)
+topTabDivider.Position = UDim2.new(0, 10, 0, 88)
+topTabDivider.BackgroundColor3 = Theme.SURFACE_ALT
+topTabDivider.BorderSizePixel = 0
+topTabDivider.Visible = false
+topTabDivider.Parent = main
+bindTheme(topTabDivider, "BackgroundColor3", "SURFACE_ALT")
+
+-- ============================================
+-- STATUS BAR — with credit + 3s auto-clear
+-- ============================================
+local status = Instance.new("TextLabel")
+status.Size = UDim2.new(1, -20, 0, 26)
+status.Position = UDim2.new(0, 10, 1, -36)
+status.BackgroundColor3 = Theme.SURFACE
+status.BackgroundTransparency = 0.3
+status.BorderSizePixel = 0
+status.Text = "  Made by brainrottinbattles"
+status.TextColor3 = Color3.fromRGB(255, 255, 255)
+status.Font = Theme.FONT_BOLD
+status.TextSize = 11
+status.TextXAlignment = Enum.TextXAlignment.Left
+status.ZIndex = 5
+status.RichText = true
+status.Parent = main
+Instance.new("UICorner", status).CornerRadius = Theme.CORNER_SM
+bindTheme(status, "BackgroundColor3", "SURFACE")
+
+local CREDIT = "  Made by brainrottinbattles"
+local statusTimeout = nil
+
+local function setStatus(text)
+    if text == "Ready" or text == nil or text == "" then
+        status.Text = CREDIT
+    else
+        status.Text = CREDIT .. "  ·  " .. tostring(text)
+    end
+    print("[Prism] " .. tostring(text))
+
+    if statusTimeout then
+        task.cancel(statusTimeout)
+        statusTimeout = nil
+    end
+
+    statusTimeout = task.delay(3, function()
+        status.Text = CREDIT
+        statusTimeout = nil
+    end)
+end
+
+local function makeLabel(parent, text, order, color)
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, 0, 0, 18)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = text
+    lbl.TextColor3 = color or Theme.TEXT_DIM
+    lbl.TextSize = 11
+    lbl.Font = Theme.FONT_BOLD
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.LayoutOrder = order or 1
+    lbl.Parent = parent
+    return lbl
+end
+
+local function makeDivider(parent, order)
+    local d = Instance.new("Frame")
+    d.Size = UDim2.new(1, 0, 0, 1)
+    d.BackgroundColor3 = Theme.SURFACE_ALT
+    d.BorderSizePixel = 0
+    d.LayoutOrder = order or 1
+    d.Parent = parent
+    bindTheme(d, "BackgroundColor3", "SURFACE_ALT")
+    return d
+end
+
+local function makeButton(parent, text, color, order)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 32)
+    btn.BackgroundColor3 = color
+    btn.BackgroundTransparency = 0.1
+    btn.Text = text
+    btn.TextColor3 = Theme.TEXT
+    btn.Font = Theme.FONT_BOLD
+    btn.TextSize = 12
+    btn.LayoutOrder = order or 1
+    btn.Parent = parent
+    Instance.new("UICorner", btn).CornerRadius = Theme.CORNER_SM
+    bindTheme(btn, "TextColor3", "TEXT")
+    return btn
+end
+
+local function makeInput(parent, placeholder, default, order)
+    local box = Instance.new("TextBox")
+    box.Size = UDim2.new(1, 0, 0, 30)
+    box.BackgroundColor3 = Theme.SURFACE
+    box.BackgroundTransparency = 0.3
+    box.BorderSizePixel = 0
+    box.TextColor3 = Theme.TEXT
+    box.PlaceholderText = placeholder
+    box.PlaceholderColor3 = Theme.TEXT_MUTED
+    box.Text = default or ""
+    box.Font = Theme.FONT
+    box.TextSize = 12
+    box.ClearTextOnFocus = false
+    box.LayoutOrder = order or 1
+    box.Parent = parent
+    Instance.new("UICorner", box).CornerRadius = Theme.CORNER_SM
+    bindTheme(box, "BackgroundColor3", "SURFACE")
+    bindTheme(box, "TextColor3", "TEXT")
+    return box
+end
+
+local function makeRow(parent, order)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 32)
+    row.BackgroundTransparency = 1
+    row.LayoutOrder = order or 1
+    row.Parent = parent
+    return row
+end
+
+local function makeSmallInput(parent, placeholder, default)
+    local box = Instance.new("TextBox")
+    box.BackgroundColor3 = Theme.SURFACE
+    box.BackgroundTransparency = 0.3
+    box.BorderSizePixel = 0
+    box.TextColor3 = Theme.TEXT
+    box.PlaceholderText = placeholder
+    box.PlaceholderColor3 = Theme.TEXT_MUTED
+    box.Text = default or ""
+    box.Font = Theme.FONT
+    box.TextSize = 12
+    box.ClearTextOnFocus = false
+    box.Parent = parent
+    Instance.new("UICorner", box).CornerRadius = Theme.CORNER_SM
+    bindTheme(box, "BackgroundColor3", "SURFACE")
+    bindTheme(box, "TextColor3", "TEXT")
+    return box
+end
+
+local function makeSlider(parent, labelText, minVal, maxVal, default, order, onChange)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 24)
+    row.BackgroundTransparency = 1
+    row.LayoutOrder = order
+    row.Parent = parent
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0, 70, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Text = labelText
+    label.TextColor3 = Theme.TEXT
+    label.TextSize = 12
+    label.Font = Theme.FONT_BOLD
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = row
+    bindTheme(label, "TextColor3", "TEXT")
+
+    local bar = Instance.new("Frame")
+    bar.Size = UDim2.new(1, -120, 0, 6)
+    bar.Position = UDim2.new(0, 70, 0.5, -3)
+    bar.BackgroundColor3 = Theme.SURFACE_ALT
+    bar.BorderSizePixel = 0
+    bar.Parent = row
+    Instance.new("UICorner", bar).CornerRadius = UDim.new(1, 0)
+    bindTheme(bar, "BackgroundColor3", "SURFACE_ALT")
+
+    local fill = Instance.new("Frame")
+    fill.Size = UDim2.new(0, 0, 1, 0)
+    fill.BackgroundColor3 = Theme.ACCENT
+    fill.BorderSizePixel = 0
+    fill.Parent = bar
+    Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
+    bindTheme(fill, "BackgroundColor3", "ACCENT")
+
+    local knob = Instance.new("TextButton")
+    knob.Size = UDim2.new(0, 14, 0, 14)
+    knob.Position = UDim2.new(0, -7, 0.5, -7)
+    knob.BackgroundColor3 = Theme.TEXT
+    knob.Text = ""
+    knob.AutoButtonColor = false
+    knob.Parent = fill
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+    bindTheme(knob, "BackgroundColor3", "TEXT")
+
+    local valueLbl = Instance.new("TextLabel")
+    valueLbl.Size = UDim2.new(0, 45, 1, 0)
+    valueLbl.Position = UDim2.new(1, -45, 0, 0)
+    valueLbl.BackgroundTransparency = 1
+    valueLbl.Text = tostring(default)
+    valueLbl.TextColor3 = Theme.TEXT
+    valueLbl.TextSize = 12
+    valueLbl.Font = Theme.FONT
+    valueLbl.TextXAlignment = Enum.TextXAlignment.Right
+    valueLbl.Parent = row
+    bindTheme(valueLbl, "TextColor3", "TEXT")
+
+    local value = math.clamp(default, minVal, maxVal)
+    local dragging = false
+
+    local function updateFromX(x)
+        local relX = math.clamp((x - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+        value = minVal + relX * (maxVal - minVal)
+        if maxVal <= 1 then
+            value = math.floor(value * 1000) / 1000
+            valueLbl.Text = string.format("%.2f", value)
+        else
+            value = math.floor(value + 0.5)
+            valueLbl.Text = tostring(value)
+        end
+        local scale = (value - minVal) / (maxVal - minVal)
+        fill.Size = UDim2.new(scale, 0, 1, 0)
+        if onChange then onChange(value) end
+    end
+
+    local function setValue(v)
+        value = math.clamp(v, minVal, maxVal)
+        if maxVal <= 1 then
+            value = math.floor(value * 1000) / 1000
+            valueLbl.Text = string.format("%.2f", value)
+        else
+            value = math.floor(value + 0.5)
+            valueLbl.Text = tostring(value)
+        end
+        local scale = (value - minVal) / (maxVal - minVal)
+        fill.Size = UDim2.new(scale, 0, 1, 0)
+        if onChange then onChange(value) end
+    end
+
+    bar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            updateFromX(input.Position.X)
+        end
+    end)
+    knob.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            updateFromX(input.Position.X)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch) then
+            updateFromX(input.Position.X)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+
+    local initScale = (value - minVal) / (maxVal - minVal)
+    fill.Size = UDim2.new(initScale, 0, 1, 0)
+
+    return { setValue = setValue, getValue = function() return value end }
+end
+
+local tabs = {}
+local tabOrder = {}
+
+local function buildPage(parent)
+    local page = Instance.new("ScrollingFrame")
+    page.Size = UDim2.new(1, -24, 1, -24)
+    page.Position = UDim2.new(0, 12, 0, 12)
+    page.BackgroundTransparency = 1
+    page.BorderSizePixel = 0
+    page.ScrollBarThickness = 3
+    page.ScrollBarImageColor3 = Theme.SURFACE_HOVER
+    page.CanvasSize = UDim2.new(0, 0, 0, 0)
+    page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    page.Visible = false
+    page.Parent = parent
+
+    local layout = Instance.new("UIListLayout")
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Padding = UDim.new(0, 6)
+    layout.Parent = page
+
+    local pad = Instance.new("UIPadding")
+    pad.PaddingTop = UDim.new(0, 8)
+    pad.PaddingBottom = UDim.new(0, 12)
+    pad.PaddingLeft = UDim.new(0, 2)
+    pad.PaddingRight = UDim.new(0, 2)
+    pad.Parent = page
+
+    return page
+end
+
+local function createTab(name, icon)
+    local sbtn = Instance.new("TextButton")
+    sbtn.Size = UDim2.new(1, 0, 0, 34)
+    sbtn.BackgroundColor3 = Theme.SURFACE
+    sbtn.BackgroundTransparency = 0.5
+    sbtn.Text = "   " .. icon .. "   " .. name
+    sbtn.TextColor3 = Theme.TEXT_DIM
+    sbtn.Font = Theme.FONT_BOLD
+    sbtn.TextSize = 12
+    sbtn.TextXAlignment = Enum.TextXAlignment.Left
+    sbtn.AutoButtonColor = false
+    sbtn.Parent = sidebar
+    Instance.new("UICorner", sbtn).CornerRadius = Theme.CORNER_SM
+
+    local sbtnPad = Instance.new("UIPadding")
+    sbtnPad.PaddingLeft = UDim.new(0, 6)
+    sbtnPad.Parent = sbtn
+
+    local accentBar = Instance.new("Frame")
+    accentBar.Size = UDim2.new(0, 3, 0.6, 0)
+    accentBar.Position = UDim2.new(0, 0, 0.2, 0)
+    accentBar.BackgroundColor3 = Theme.ACCENT
+    accentBar.BorderSizePixel = 0
+    accentBar.Visible = false
+    accentBar.Parent = sbtn
+    Instance.new("UICorner", accentBar).CornerRadius = UDim.new(1, 0)
+    bindTheme(accentBar, "BackgroundColor3", "ACCENT")
+
+    local tbtn = Instance.new("TextButton")
+    tbtn.Size = UDim2.new(0, 86, 1, 0)
+    tbtn.BackgroundColor3 = Theme.SURFACE
+    tbtn.BackgroundTransparency = 0.5
+    tbtn.Text = icon .. " " .. name
+    tbtn.TextColor3 = Theme.TEXT_DIM
+    tbtn.Font = Theme.FONT_BOLD
+    tbtn.TextSize = 11
+    tbtn.AutoButtonColor = false
+    tbtn.Visible = false
+    tbtn.Parent = topTabBar
+    Instance.new("UICorner", tbtn).CornerRadius = Theme.CORNER_SM
+
+    local page = buildPage(panelContent)
+
+    local tab = { name = name, sidebarBtn = sbtn, topBtn = tbtn, page = page, accent = accentBar }
+    tabs[name] = tab
+    table.insert(tabOrder, tab)
+
+    return tab
+end
+
+-- SPAWN TAB
+local spawnTab = createTab("Spawn", "📦")
+local spawnPage = spawnTab.page
+
+makeLabel(spawnPage, "MULTI SPAWN · 1–100", 1, Theme.INFO)
+local multiRow = makeRow(spawnPage, 2)
+local multiToggle = Instance.new("TextButton")
+multiToggle.Size = UDim2.new(0.5, -3, 1, 0)
+multiToggle.Position = UDim2.new(0, 0, 0, 0)
+multiToggle.BackgroundColor3 = Theme.SURFACE_ALT
+multiToggle.BackgroundTransparency = 0.1
+multiToggle.Text = "Spawn All"
+multiToggle.TextColor3 = Theme.TEXT
+multiToggle.Font = Theme.FONT_BOLD
+multiToggle.TextSize = 12
+multiToggle.Parent = multiRow
+Instance.new("UICorner", multiToggle).CornerRadius = Theme.CORNER_SM
+bindTheme(multiToggle, "BackgroundColor3", "SURFACE_ALT")
+
+local multiPickup = Instance.new("TextButton")
+multiPickup.Size = UDim2.new(0.5, -3, 1, 0)
+multiPickup.Position = UDim2.new(0.5, 3, 0, 0)
+multiPickup.BackgroundColor3 = Theme.DANGER
+multiPickup.BackgroundTransparency = 0.3
+multiPickup.Text = "Pickup All"
+multiPickup.TextColor3 = Theme.TEXT
+multiPickup.Font = Theme.FONT_BOLD
+multiPickup.TextSize = 12
+multiPickup.Parent = multiRow
+Instance.new("UICorner", multiPickup).CornerRadius = Theme.CORNER_SM
+bindTheme(multiPickup, "BackgroundColor3", "DANGER")
+
+makeLabel(spawnPage, "SINGLE SPAWN · CLICK GROUND", 3, Theme.INFO)
+local singleRow = makeRow(spawnPage, 4)
+local singleUID = Instance.new("TextBox")
+singleUID.Size = UDim2.new(0.3, -3, 1, 0)
+singleUID.Position = UDim2.new(0, 0, 0, 0)
+singleUID.BackgroundColor3 = Theme.SURFACE
+singleUID.BackgroundTransparency = 0.3
+singleUID.TextColor3 = Theme.TEXT
+singleUID.PlaceholderText = "UID"
+singleUID.PlaceholderColor3 = Theme.TEXT_MUTED
+singleUID.Text = "9"
+singleUID.Font = Theme.FONT
+singleUID.TextSize = 12
+singleUID.Parent = singleRow
+Instance.new("UICorner", singleUID).CornerRadius = Theme.CORNER_SM
+bindTheme(singleUID, "BackgroundColor3", "SURFACE")
+
+local singleToggle = Instance.new("TextButton")
+singleToggle.Size = UDim2.new(0.35, -3, 1, 0)
+singleToggle.Position = UDim2.new(0.3, 3, 0, 0)
+singleToggle.BackgroundColor3 = Theme.SURFACE_ALT
+singleToggle.BackgroundTransparency = 0.1
+singleToggle.Text = "OFF"
+singleToggle.TextColor3 = Theme.TEXT
+singleToggle.Font = Theme.FONT_BOLD
+singleToggle.TextSize = 12
+singleToggle.Parent = singleRow
+Instance.new("UICorner", singleToggle).CornerRadius = Theme.CORNER_SM
+bindTheme(singleToggle, "BackgroundColor3", "SURFACE_ALT")
+
+local singlePickup = Instance.new("TextButton")
+singlePickup.Size = UDim2.new(0.35, -3, 1, 0)
+singlePickup.Position = UDim2.new(0.65, 3, 0, 0)
+singlePickup.BackgroundColor3 = Theme.DANGER
+singlePickup.BackgroundTransparency = 0.3
+singlePickup.Text = "Pickup"
+singlePickup.TextColor3 = Theme.TEXT
+singlePickup.Font = Theme.FONT_BOLD
+singlePickup.TextSize = 12
+singlePickup.Parent = singleRow
+Instance.new("UICorner", singlePickup).CornerRadius = Theme.CORNER_SM
+bindTheme(singlePickup, "BackgroundColor3", "DANGER")
+
+makeDivider(spawnPage, 5)
+makeLabel(spawnPage, "TARGET PLAYER SPAMMER", 6, Theme.INFO)
+local targetBox = makeInput(spawnPage, "Target Username", "", 7)
+
+local uidRow = makeRow(spawnPage, 8)
+uidRow.Size = UDim2.new(1, 0, 0, 30)
+local targetUID1 = makeSmallInput(uidRow, "UID #1", "12")
+targetUID1.Size = UDim2.new(0.5, -3, 1, 0)
+targetUID1.Position = UDim2.new(0, 0, 0, 0)
+local targetUID2 = makeSmallInput(uidRow, "UID #2", "15")
+targetUID2.Size = UDim2.new(0.5, -3, 1, 0)
+targetUID2.Position = UDim2.new(0.5, 3, 0, 0)
+
+local settingsRow = makeRow(spawnPage, 9)
+settingsRow.Size = UDim2.new(1, 0, 0, 30)
+local targetDelay = makeSmallInput(settingsRow, "Delay", "0.5")
+targetDelay.Size = UDim2.new(0.35, -3, 1, 0)
+targetDelay.Position = UDim2.new(0, 0, 0, 0)
+
+local dirBtn = Instance.new("TextButton")
+dirBtn.Size = UDim2.new(0.65, -3, 1, 0)
+dirBtn.Position = UDim2.new(0.35, 3, 0, 0)
+dirBtn.BackgroundColor3 = Theme.SURFACE_ALT
+dirBtn.BackgroundTransparency = 0.1
+dirBtn.Text = "▶ Right"
+dirBtn.TextColor3 = Theme.TEXT
+dirBtn.Font = Theme.FONT_BOLD
+dirBtn.TextSize = 11
+dirBtn.Parent = settingsRow
+Instance.new("UICorner", dirBtn).CornerRadius = Theme.CORNER_SM
+bindTheme(dirBtn, "BackgroundColor3", "SURFACE_ALT")
+
+local directionModes = { "Right", "Left", "Front", "Back", "Beneath", "Above", "WorldX" }
+local directionIndex = 1
+dirBtn.MouseButton1Click:Connect(function()
+    directionIndex = directionIndex + 1
+    if directionIndex > #directionModes then directionIndex = 1 end
+    dirBtn.Text = "▶ " .. directionModes[directionIndex]
+    setStatus("Direction: " .. directionModes[directionIndex])
+end)
+
+local offsetsRow = makeRow(spawnPage, 10)
+offsetsRow.Size = UDim2.new(1, 0, 0, 30)
+local targetSpacing = makeSmallInput(offsetsRow, "X/Z offset", "4")
+targetSpacing.Size = UDim2.new(0.5, -3, 1, 0)
+targetSpacing.Position = UDim2.new(0, 0, 0, 0)
+local targetYOffset = makeSmallInput(offsetsRow, "Y offset", "2.5")
+targetYOffset.Size = UDim2.new(0.5, -3, 1, 0)
+targetYOffset.Position = UDim2.new(0.5, 3, 0, 0)
+
+local targetRow = makeRow(spawnPage, 11)
+local placeBtn = Instance.new("TextButton")
+placeBtn.Size = UDim2.new(0.33, -3, 1, 0)
+placeBtn.Position = UDim2.new(0, 0, 0, 0)
+placeBtn.BackgroundColor3 = Theme.ACCENT_DARK
+placeBtn.BackgroundTransparency = 0.1
+placeBtn.Text = "Place"
+placeBtn.TextColor3 = Theme.TEXT
+placeBtn.Font = Theme.FONT_BOLD
+placeBtn.TextSize = 12
+placeBtn.Parent = targetRow
+Instance.new("UICorner", placeBtn).CornerRadius = Theme.CORNER_SM
+bindTheme(placeBtn, "BackgroundColor3", "ACCENT_DARK")
+
+local targetPickup = Instance.new("TextButton")
+targetPickup.Size = UDim2.new(0.33, -3, 1, 0)
+targetPickup.Position = UDim2.new(0.33, 3, 0, 0)
+targetPickup.BackgroundColor3 = Theme.WARNING
+targetPickup.BackgroundTransparency = 0.3
+targetPickup.Text = "Pickup"
+targetPickup.TextColor3 = Theme.TEXT
+targetPickup.Font = Theme.FONT_BOLD
+targetPickup.TextSize = 12
+targetPickup.Parent = targetRow
+Instance.new("UICorner", targetPickup).CornerRadius = Theme.CORNER_SM
+bindTheme(targetPickup, "BackgroundColor3", "WARNING")
+
+local targetLoop = Instance.new("TextButton")
+targetLoop.Size = UDim2.new(0.33, -3, 1, 0)
+targetLoop.Position = UDim2.new(0.66, 3, 0, 0)
+targetLoop.BackgroundColor3 = Theme.SUCCESS
+targetLoop.BackgroundTransparency = 0.3
+targetLoop.Text = "▶ Loop"
+targetLoop.TextColor3 = Theme.TEXT
+targetLoop.Font = Theme.FONT_BOLD
+targetLoop.TextSize = 12
+targetLoop.Parent = targetRow
+Instance.new("UICorner", targetLoop).CornerRadius = Theme.CORNER_SM
+bindTheme(targetLoop, "BackgroundColor3", "SUCCESS")
+
+makeDivider(spawnPage, 12)
+makeLabel(spawnPage, "💡 LIGHT BARRAGE", 13, Theme.WARNING)
+local lightTargetBox = makeInput(spawnPage, "Target Username", "", 14)
+
+local lightUIDList = Instance.new("TextBox")
+lightUIDList.Size = UDim2.new(1, 0, 0, 80)
+lightUIDList.BackgroundColor3 = Theme.SURFACE
+lightUIDList.BackgroundTransparency = 0.3
+lightUIDList.BorderSizePixel = 0
+lightUIDList.TextColor3 = Theme.TEXT
+lightUIDList.PlaceholderText = "UIDs (comma separated)"
+lightUIDList.PlaceholderColor3 = Theme.TEXT_MUTED
+lightUIDList.Text = "85,84,83,82,81,80,79,78,77,76,75,74,73,72,71,70,69,68,67,66,20"
+lightUIDList.Font = Theme.FONT_MONO
+lightUIDList.TextSize = 11
+lightUIDList.TextWrapped = true
+lightUIDList.TextXAlignment = Enum.TextXAlignment.Left
+lightUIDList.TextYAlignment = Enum.TextYAlignment.Top
+lightUIDList.ClearTextOnFocus = false
+lightUIDList.MultiLine = true
+lightUIDList.LayoutOrder = 15
+lightUIDList.Parent = spawnPage
+Instance.new("UICorner", lightUIDList).CornerRadius = Theme.CORNER_SM
+bindTheme(lightUIDList, "BackgroundColor3", "SURFACE")
+bindTheme(lightUIDList, "TextColor3", "TEXT")
+
+local lightConfigRow = makeRow(spawnPage, 16)
+lightConfigRow.Size = UDim2.new(1, 0, 0, 30)
+local lightCount = makeSmallInput(lightConfigRow, "Count", "5")
+lightCount.Size = UDim2.new(0.33, -3, 1, 0)
+lightCount.Position = UDim2.new(0, 0, 0, 0)
+local lightRadius = makeSmallInput(lightConfigRow, "Radius", "6")
+lightRadius.Size = UDim2.new(0.33, -3, 1, 0)
+lightRadius.Position = UDim2.new(0.33, 3, 0, 0)
+
+local lightModeBtn = Instance.new("TextButton")
+lightModeBtn.Size = UDim2.new(0.34, -3, 1, 0)
+lightModeBtn.Position = UDim2.new(0.66, 3, 0, 0)
+lightModeBtn.BackgroundColor3 = Theme.ACCENT_DARK
+lightModeBtn.BackgroundTransparency = 0.1
+lightModeBtn.Text = "◉ Sphere"
+lightModeBtn.TextColor3 = Theme.TEXT
+lightModeBtn.Font = Theme.FONT_BOLD
+lightModeBtn.TextSize = 11
+lightModeBtn.Parent = lightConfigRow
+Instance.new("UICorner", lightModeBtn).CornerRadius = Theme.CORNER_SM
+bindTheme(lightModeBtn, "BackgroundColor3", "ACCENT_DARK")
+
+local lightModes = { "Sphere", "Dome", "Tight" }
+local lightModeIndex = 1
+lightModeBtn.MouseButton1Click:Connect(function()
+    lightModeIndex = lightModeIndex + 1
+    if lightModeIndex > #lightModes then lightModeIndex = 1 end
+    lightModeBtn.Text = "◉ " .. lightModes[lightModeIndex]
+    setStatus("Light: " .. lightModes[lightModeIndex])
+end)
+
+local lightBtnRow = makeRow(spawnPage, 17)
+lightBtnRow.Size = UDim2.new(1, 0, 0, 32)
+local lightTrackBtn = Instance.new("TextButton")
+lightTrackBtn.Size = UDim2.new(0.33, -3, 1, 0)
+lightTrackBtn.Position = UDim2.new(0, 0, 0, 0)
+lightTrackBtn.BackgroundColor3 = Theme.SURFACE_ALT
+lightTrackBtn.BackgroundTransparency = 0.1
+lightTrackBtn.Text = "Track OFF"
+lightTrackBtn.TextColor3 = Theme.TEXT
+lightTrackBtn.Font = Theme.FONT_BOLD
+lightTrackBtn.TextSize = 11
+lightTrackBtn.Parent = lightBtnRow
+Instance.new("UICorner", lightTrackBtn).CornerRadius = Theme.CORNER_SM
+bindTheme(lightTrackBtn, "BackgroundColor3", "SURFACE_ALT")
+
+local lightBarrageBtn = Instance.new("TextButton")
+lightBarrageBtn.Size = UDim2.new(0.34, -3, 1, 0)
+lightBarrageBtn.Position = UDim2.new(0.33, 3, 0, 0)
+lightBarrageBtn.BackgroundColor3 = Theme.WARNING
+lightBarrageBtn.BackgroundTransparency = 0.2
+lightBarrageBtn.Text = "⚡ Barrage"
+lightBarrageBtn.TextColor3 = Theme.TEXT
+lightBarrageBtn.Font = Theme.FONT_BOLD
+lightBarrageBtn.TextSize = 11
+lightBarrageBtn.Parent = lightBtnRow
+Instance.new("UICorner", lightBarrageBtn).CornerRadius = Theme.CORNER_SM
+bindTheme(lightBarrageBtn, "BackgroundColor3", "WARNING")
+
+local lightCleanupBtn = Instance.new("TextButton")
+lightCleanupBtn.Size = UDim2.new(0.33, -3, 1, 0)
+lightCleanupBtn.Position = UDim2.new(0.67, 3, 0, 0)
+lightCleanupBtn.BackgroundColor3 = Theme.DANGER
+lightCleanupBtn.BackgroundTransparency = 0.3
+lightCleanupBtn.Text = "Cleanup"
+lightCleanupBtn.TextColor3 = Theme.TEXT
+lightCleanupBtn.Font = Theme.FONT_BOLD
+lightCleanupBtn.TextSize = 11
+lightCleanupBtn.Parent = lightBtnRow
+Instance.new("UICorner", lightCleanupBtn).CornerRadius = Theme.CORNER_SM
+bindTheme(lightCleanupBtn, "BackgroundColor3", "DANGER")
+
+-- LOOK TAB
+local lookTab = createTab("Look", "🎨")
+local lookPage = lookTab.page
+local currentColor = { R = 255, G = 0, B = 0 }
+local sliderRefs = {}
+local liveApply = false
+
+makeLabel(lookPage, "BODY COLOR · RGB", 1, Theme.INFO)
+local previewRow = makeRow(lookPage, 2)
+previewRow.Size = UDim2.new(1, 0, 0, 38)
+
+local preview = Instance.new("Frame")
+preview.Size = UDim2.new(0, 62, 1, -4)
+preview.Position = UDim2.new(0, 0, 0, 2)
+preview.BackgroundColor3 = Color3.fromRGB(currentColor.R, currentColor.G, currentColor.B)
+preview.BorderSizePixel = 0
+preview.Parent = previewRow
+Instance.new("UICorner", preview).CornerRadius = Theme.CORNER_SM
+
+local hexLabel = Instance.new("TextLabel")
+hexLabel.Size = UDim2.new(1, -70, 1, 0)
+hexLabel.Position = UDim2.new(0, 72, 0, 0)
+hexLabel.BackgroundTransparency = 1
+hexLabel.Text = string.format("#%02X%02X%02X", currentColor.R, currentColor.G, currentColor.B)
+hexLabel.TextColor3 = Theme.TEXT
+hexLabel.TextSize = 14
+hexLabel.Font = Theme.FONT_MONO
+hexLabel.TextXAlignment = Enum.TextXAlignment.Left
+hexLabel.Parent = previewRow
+bindTheme(hexLabel, "TextColor3", "TEXT")
+
+local function refreshBodyPreview()
+    preview.BackgroundColor3 = Color3.fromRGB(currentColor.R, currentColor.G, currentColor.B)
+    hexLabel.Text = string.format("#%02X%02X%02X", currentColor.R, currentColor.G, currentColor.B)
+end
+
+sliderRefs.R = makeSlider(lookPage, "Red",   0, 255, currentColor.R, 3, function(v)
+    currentColor.R = v
+    refreshBodyPreview()
+    if liveApply and SetSkinTone then
+        fireRemote(SetSkinTone, Color3.fromRGB(currentColor.R, currentColor.G, currentColor.B))
+    end
+end)
+sliderRefs.G = makeSlider(lookPage, "Green", 0, 255, currentColor.G, 4, function(v)
+    currentColor.G = v
+    refreshBodyPreview()
+    if liveApply and SetSkinTone then
+        fireRemote(SetSkinTone, Color3.fromRGB(currentColor.R, currentColor.G, currentColor.B))
+    end
+end)
+sliderRefs.B = makeSlider(lookPage, "Blue",  0, 255, currentColor.B, 5, function(v)
+    currentColor.B = v
+    refreshBodyPreview()
+    if liveApply and SetSkinTone then
+        fireRemote(SetSkinTone, Color3.fromRGB(currentColor.R, currentColor.G, currentColor.B))
+    end
+end)
+
+task.delay(1, function() liveApply = true end)
+
+local skinActionRow = makeRow(lookPage, 6)
+local skinApply = Instance.new("TextButton")
+skinApply.Size = UDim2.new(0.65, -3, 1, 0)
+skinApply.Position = UDim2.new(0, 0, 0, 0)
+skinApply.BackgroundColor3 = Theme.SUCCESS
+skinApply.BackgroundTransparency = 0.2
+skinApply.Text = "Apply Color"
+skinApply.TextColor3 = Theme.TEXT
+skinApply.Font = Theme.FONT_BOLD
+skinApply.TextSize = 12
+skinApply.Parent = skinActionRow
+Instance.new("UICorner", skinApply).CornerRadius = Theme.CORNER_SM
+bindTheme(skinApply, "BackgroundColor3", "SUCCESS")
+
+local skinRandom = Instance.new("TextButton")
+skinRandom.Size = UDim2.new(0.35, -3, 1, 0)
+skinRandom.Position = UDim2.new(0.65, 3, 0, 0)
+skinRandom.BackgroundColor3 = Theme.SURFACE_ALT
+skinRandom.BackgroundTransparency = 0.1
+skinRandom.Text = "Random"
+skinRandom.TextColor3 = Theme.TEXT
+skinRandom.Font = Theme.FONT_BOLD
+skinRandom.TextSize = 12
+skinRandom.Parent = skinActionRow
+Instance.new("UICorner", skinRandom).CornerRadius = Theme.CORNER_SM
+bindTheme(skinRandom, "BackgroundColor3", "SURFACE_ALT")
+
+local decalInput = makeInput(lookPage, "Decal ID", "10004274311", 10)
+local decalApply = makeButton(lookPage, "Apply Decal", Theme.ACCENT_DARK, 11)
+local nameToggle = makeButton(lookPage, "▶ Start Name Spam", Theme.SUCCESS, 12)
+
+_G.Prism = {
+    Theme = Theme, setStatus = setStatus,
+    fireRemote = fireRemote, Remotes = Remotes,
+    OfficeAction = OfficeAction, SetSkinTone = SetSkinTone,
+    SubmitRPName = SubmitRPName, SetFace = SetFace,
+    UpdateRole = UpdateRole, RPNameConfig = RPNameConfig,
+    player = player, mouse = mouse, main = main,
+    currentColor = currentColor, sliderRefs = sliderRefs,
+    preview = preview, hexLabel = hexLabel,
+    directionModes = directionModes,
+    saveConfig = saveConfig,
+    loadConfig = loadConfig,
+    clampToScreen = clampToScreen,
+    bindTheme = bindTheme,
+    makeLabel = makeLabel, makeDivider = makeDivider,
+    makeButton = makeButton, makeInput = makeInput,
+    makeRow = makeRow, makeSmallInput = makeSmallInput,
+    makeSlider = makeSlider,
+    createTab = createTab,
+    tabs = tabs, tabOrder = tabOrder,
+    sidebar = sidebar, panel = panel, panelContent = panelContent,
+    topTabBar = topTabBar, topTabDivider = topTabDivider,
+    status = status, header = header,
+    layoutToggle = layoutToggle,
+    minBtn = minBtn, closeBtn = closeBtn,
+    mainStroke = mainStroke, screenGui = screenGui,
+    SIDEBAR_W = SIDEBAR_W, PANEL_W = PANEL_W,
+    WINDOW_H = WINDOW_H, TOP_TAB_W = TOP_TAB_W,
+    UserInputService = UserInputService,
+    TweenService = TweenService,
+    colorToTable = colorToTable,
+    tableToColor = tableToColor,
+    CONFIG_FILE = CONFIG_FILE,
+    multiToggle = multiToggle, multiPickup = multiPickup,
+    singleUID = singleUID, singleToggle = singleToggle, singlePickup = singlePickup,
+    targetBox = targetBox, targetUID1 = targetUID1, targetUID2 = targetUID2,
+    targetDelay = targetDelay, targetSpacing = targetSpacing,
+    targetYOffset = targetYOffset, dirBtn = dirBtn,
+    placeBtn = placeBtn, targetPickup = targetPickup, targetLoop = targetLoop,
+    lightTargetBox = lightTargetBox, lightUIDList = lightUIDList,
+    lightCount = lightCount, lightRadius = lightRadius,
+    lightModeBtn = lightModeBtn, lightTrackBtn = lightTrackBtn,
+    lightBarrageBtn = lightBarrageBtn, lightCleanupBtn = lightCleanupBtn,
+    lightModes = lightModes,
+    decalInput = decalInput, decalApply = decalApply,
+    nameToggle = nameToggle, skinApply = skinApply, skinRandom = skinRandom,
+    floorPart = floorPart, getFloorPart = getFloorPart,
+}
+
+print("✅ PRISM v25 — Chunk 1A loaded")
+
+end
+
+--[[
+    PRISM — v25
+    CHUNK 1B — Roles, Info, Chat, Theme, Util tabs + popup + state machine
+]]
+
+do
+
+local P = _G.Prism
+
+local Theme = P.Theme
+local setStatus = P.setStatus
+local player = P.player
+local main = P.main
+local bindTheme = P.bindTheme
+local makeLabel = P.makeLabel
+local makeDivider = P.makeDivider
+local makeButton = P.makeButton
+local makeSlider = P.makeSlider
+local createTab = P.createTab
+local tabs = P.tabs
+local tabOrder = P.tabOrder
+local sidebar = P.sidebar
+local panel = P.panel
+local panelContent = P.panelContent
+local topTabBar = P.topTabBar
+local topTabDivider = P.topTabDivider
+local status = P.status
+local layoutToggle = P.layoutToggle
+local minBtn = P.minBtn
+local closeBtn = P.closeBtn
+local mainStroke = P.mainStroke
+local screenGui = P.screenGui
+local clampToScreen = P.clampToScreen
+local saveConfig = P.saveConfig
+local loadConfig = P.loadConfig
+local colorToTable = P.colorToTable
+local tableToColor = P.tableToColor
+local SIDEBAR_W = P.SIDEBAR_W
+local PANEL_W = P.PANEL_W
+local WINDOW_H = P.WINDOW_H
+local TOP_TAB_W = P.TOP_TAB_W
+local UserInputService = P.UserInputService
+local TweenService = P.TweenService
+
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+
+local function deleteConfig()
+    if not (delfile and isfile and isfile("prism_config.json")) then return end
+    pcall(function() delfile("prism_config.json") end)
+end
+
+-- ROLES TAB
+local rolesTab = createTab("Roles", "🎭")
+local rolesPage = rolesTab.page
+
+makeLabel(rolesPage, "RANDOM ROLE GENERATOR", 1, Color3.fromRGB(220, 160, 255))
+makeLabel(rolesPage, "Lvl 1 roles only · instant", 2, Theme.TEXT_MUTED)
+
+local randomRoleBtn = Instance.new("TextButton")
+randomRoleBtn.Size = UDim2.new(1, 0, 0, 52)
+randomRoleBtn.BackgroundColor3 = Color3.fromRGB(130, 70, 190)
+randomRoleBtn.BackgroundTransparency = 0.1
+randomRoleBtn.Text = "🎲  Randomize Role"
+randomRoleBtn.TextColor3 = Theme.TEXT
+randomRoleBtn.Font = Theme.FONT_BOLD
+randomRoleBtn.TextSize = 16
+randomRoleBtn.LayoutOrder = 3
+randomRoleBtn.Parent = rolesPage
+Instance.new("UICorner", randomRoleBtn).CornerRadius = UDim.new(0, 10)
+
+local undoRoleBtn = Instance.new("TextButton")
+undoRoleBtn.Size = UDim2.new(1, 0, 0, 34)
+undoRoleBtn.BackgroundColor3 = Theme.SURFACE_ALT
+undoRoleBtn.BackgroundTransparency = 0.1
+undoRoleBtn.Text = "↩  Undo Last Change"
+undoRoleBtn.TextColor3 = Theme.TEXT
+undoRoleBtn.Font = Theme.FONT_BOLD
+undoRoleBtn.TextSize = 12
+undoRoleBtn.LayoutOrder = 4
+undoRoleBtn.Parent = rolesPage
+Instance.new("UICorner", undoRoleBtn).CornerRadius = Theme.CORNER_SM
+bindTheme(undoRoleBtn, "BackgroundColor3", "SURFACE_ALT")
+
+makeLabel(rolesPage, "RECENT CHANGES", 5, Color3.fromRGB(220, 160, 255))
+
+local historyBox = Instance.new("TextLabel")
+historyBox.Size = UDim2.new(1, 0, 0, 220)
+historyBox.BackgroundColor3 = Theme.SURFACE
+historyBox.BackgroundTransparency = 0.2
+historyBox.BorderSizePixel = 0
+historyBox.Text = "(no changes yet)"
+historyBox.TextColor3 = Theme.TEXT_DIM
+historyBox.Font = Theme.FONT_MONO
+historyBox.TextSize = 11
+historyBox.TextXAlignment = Enum.TextXAlignment.Left
+historyBox.TextYAlignment = Enum.TextYAlignment.Top
+historyBox.TextWrapped = true
+historyBox.LayoutOrder = 6
+historyBox.Parent = rolesPage
+Instance.new("UICorner", historyBox).CornerRadius = Theme.CORNER_SM
+bindTheme(historyBox, "BackgroundColor3", "SURFACE")
+bindTheme(historyBox, "TextColor3", "TEXT_DIM")
+
+-- INFO TAB
+local infoTab = createTab("Info", "📋")
+local infoPage = infoTab.page
+
+makeLabel(infoPage, "PLAYERS IN SERVER", 1, Theme.INFO)
+
+local infoControls = Instance.new("Frame")
+infoControls.Size = UDim2.new(1, 0, 0, 30)
+infoControls.BackgroundTransparency = 1
+infoControls.LayoutOrder = 2
+infoControls.Parent = infoPage
+
+local refreshInfoBtn = Instance.new("TextButton")
+refreshInfoBtn.Size = UDim2.new(0.5, -3, 1, 0)
+refreshInfoBtn.Position = UDim2.new(0, 0, 0, 0)
+refreshInfoBtn.BackgroundColor3 = Theme.ACCENT_DARK
+refreshInfoBtn.BackgroundTransparency = 0.1
+refreshInfoBtn.Text = "🔄  Refresh"
+refreshInfoBtn.TextColor3 = Theme.TEXT
+refreshInfoBtn.Font = Theme.FONT_BOLD
+refreshInfoBtn.TextSize = 12
+refreshInfoBtn.Parent = infoControls
+Instance.new("UICorner", refreshInfoBtn).CornerRadius = Theme.CORNER_SM
+bindTheme(refreshInfoBtn, "BackgroundColor3", "ACCENT_DARK")
+
+local infoCountLbl = Instance.new("TextLabel")
+infoCountLbl.Size = UDim2.new(0.5, -3, 1, 0)
+infoCountLbl.Position = UDim2.new(0.5, 3, 0, 0)
+infoCountLbl.BackgroundColor3 = Theme.SURFACE
+infoCountLbl.BackgroundTransparency = 0.3
+infoCountLbl.BorderSizePixel = 0
+infoCountLbl.Text = "0 players"
+infoCountLbl.TextColor3 = Theme.TEXT_DIM
+infoCountLbl.Font = Theme.FONT
+infoCountLbl.TextSize = 12
+infoCountLbl.Parent = infoControls
+Instance.new("UICorner", infoCountLbl).CornerRadius = Theme.CORNER_SM
+bindTheme(infoCountLbl, "BackgroundColor3", "SURFACE")
+bindTheme(infoCountLbl, "TextColor3", "TEXT_DIM")
+
+local playerListFrame = Instance.new("ScrollingFrame")
+playerListFrame.Size = UDim2.new(1, 0, 0, 260)
+playerListFrame.BackgroundColor3 = Theme.SURFACE
+playerListFrame.BackgroundTransparency = 0.3
+playerListFrame.BorderSizePixel = 0
+playerListFrame.ScrollBarThickness = 3
+playerListFrame.ScrollBarImageColor3 = Theme.SURFACE_HOVER
+playerListFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+playerListFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+playerListFrame.LayoutOrder = 3
+playerListFrame.Parent = infoPage
+Instance.new("UICorner", playerListFrame).CornerRadius = Theme.CORNER_SM
+bindTheme(playerListFrame, "BackgroundColor3", "SURFACE")
+
+local playerListPad = Instance.new("UIPadding")
+playerListPad.PaddingTop = UDim.new(0, 4)
+playerListPad.PaddingBottom = UDim.new(0, 4)
+playerListPad.PaddingLeft = UDim.new(0, 4)
+playerListPad.PaddingRight = UDim.new(0, 4)
+playerListPad.Parent = playerListFrame
+
+local playerListLayout = Instance.new("UIListLayout")
+playerListLayout.SortOrder = Enum.SortOrder.Name
+playerListLayout.Padding = UDim.new(0, 3)
+playerListLayout.Parent = playerListFrame
+
+local searchRow = Instance.new("Frame")
+searchRow.Size = UDim2.new(1, 0, 0, 32)
+searchRow.BackgroundTransparency = 1
+searchRow.LayoutOrder = 4
+searchRow.Parent = infoPage
+
+local searchBox = Instance.new("TextBox")
+searchBox.Size = UDim2.new(1, 0, 1, 0)
+searchBox.BackgroundColor3 = Theme.SURFACE
+searchBox.BackgroundTransparency = 0.3
+searchBox.BorderSizePixel = 0
+searchBox.TextColor3 = Theme.TEXT
+searchBox.PlaceholderText = "🔍  Search by name, UserId, or RP name..."
+searchBox.PlaceholderColor3 = Theme.TEXT_MUTED
+searchBox.Text = ""
+searchBox.Font = Theme.FONT
+searchBox.TextSize = 12
+searchBox.ClearTextOnFocus = false
+searchBox.TextXAlignment = Enum.TextXAlignment.Left
+searchBox.Parent = searchRow
+Instance.new("UICorner", searchBox).CornerRadius = Theme.CORNER_SM
+bindTheme(searchBox, "BackgroundColor3", "SURFACE")
+bindTheme(searchBox, "TextColor3", "TEXT")
+
+-- CHAT TAB
+local chatTab = createTab("Chat", "💬")
+local chatPage = chatTab.page
+
+makeLabel(chatPage, "LIVE CHAT LOG", 1, Theme.INFO)
+
+local chatControls = Instance.new("Frame")
+chatControls.Size = UDim2.new(1, 0, 0, 30)
+chatControls.BackgroundTransparency = 1
+chatControls.LayoutOrder = 2
+chatControls.Parent = chatPage
+
+local chatPauseBtn = Instance.new("TextButton")
+chatPauseBtn.Size = UDim2.new(0.33, -3, 1, 0)
+chatPauseBtn.Position = UDim2.new(0, 0, 0, 0)
+chatPauseBtn.BackgroundColor3 = Theme.SURFACE_ALT
+chatPauseBtn.BackgroundTransparency = 0.1
+chatPauseBtn.Text = "⏸️  Pause"
+chatPauseBtn.TextColor3 = Theme.TEXT
+chatPauseBtn.Font = Theme.FONT_BOLD
+chatPauseBtn.TextSize = 11
+chatPauseBtn.Parent = chatControls
+Instance.new("UICorner", chatPauseBtn).CornerRadius = Theme.CORNER_SM
+bindTheme(chatPauseBtn, "BackgroundColor3", "SURFACE_ALT")
+
+local chatClearBtn = Instance.new("TextButton")
+chatClearBtn.Size = UDim2.new(0.34, -3, 1, 0)
+chatClearBtn.Position = UDim2.new(0.33, 3, 0, 0)
+chatClearBtn.BackgroundColor3 = Theme.DANGER
+chatClearBtn.BackgroundTransparency = 0.2
+chatClearBtn.Text = "🗑️  Clear"
+chatClearBtn.TextColor3 = Theme.TEXT
+chatClearBtn.Font = Theme.FONT_BOLD
+chatClearBtn.TextSize = 11
+chatClearBtn.Parent = chatControls
+Instance.new("UICorner", chatClearBtn).CornerRadius = Theme.CORNER_SM
+bindTheme(chatClearBtn, "BackgroundColor3", "DANGER")
+
+local chatPinBtn = Instance.new("TextButton")
+chatPinBtn.Size = UDim2.new(0.33, -3, 1, 0)
+chatPinBtn.Position = UDim2.new(0.67, 3, 0, 0)
+chatPinBtn.BackgroundColor3 = Theme.SUCCESS
+chatPinBtn.BackgroundTransparency = 0.2
+chatPinBtn.Text = "📌  Pinned"
+chatPinBtn.TextColor3 = Theme.TEXT
+chatPinBtn.Font = Theme.FONT_BOLD
+chatPinBtn.TextSize = 11
+chatPinBtn.Parent = chatControls
+Instance.new("UICorner", chatPinBtn).CornerRadius = Theme.CORNER_SM
+bindTheme(chatPinBtn, "BackgroundColor3", "SUCCESS")
+
+makeLabel(chatPage, "PLAYERS · click for their log", 3, Theme.INFO)
+
+local chatPlayerListFrame = Instance.new("ScrollingFrame")
+chatPlayerListFrame.Size = UDim2.new(1, 0, 0, 130)
+chatPlayerListFrame.BackgroundColor3 = Theme.SURFACE
+chatPlayerListFrame.BackgroundTransparency = 0.3
+chatPlayerListFrame.BorderSizePixel = 0
+chatPlayerListFrame.ScrollBarThickness = 3
+chatPlayerListFrame.ScrollBarImageColor3 = Theme.SURFACE_HOVER
+chatPlayerListFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+chatPlayerListFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+chatPlayerListFrame.LayoutOrder = 4
+chatPlayerListFrame.Parent = chatPage
+Instance.new("UICorner", chatPlayerListFrame).CornerRadius = Theme.CORNER_SM
+bindTheme(chatPlayerListFrame, "BackgroundColor3", "SURFACE")
+
+local chatPlayerListPad = Instance.new("UIPadding")
+chatPlayerListPad.PaddingTop = UDim.new(0, 4)
+chatPlayerListPad.PaddingBottom = UDim.new(0, 4)
+chatPlayerListPad.PaddingLeft = UDim.new(0, 4)
+chatPlayerListPad.PaddingRight = UDim.new(0, 4)
+chatPlayerListPad.Parent = chatPlayerListFrame
+
+local chatPlayerListLayout = Instance.new("UIListLayout")
+chatPlayerListLayout.SortOrder = Enum.SortOrder.Name
+chatPlayerListLayout.Padding = UDim.new(0, 3)
+chatPlayerListLayout.Parent = chatPlayerListFrame
+
+makeLabel(chatPage, "GLOBAL FEED · all messages", 5, Theme.INFO)
+
+local chatFeedFrame = Instance.new("ScrollingFrame")
+chatFeedFrame.Size = UDim2.new(1, 0, 0, 200)
+chatFeedFrame.BackgroundColor3 = Theme.SURFACE
+chatFeedFrame.BackgroundTransparency = 0.3
+chatFeedFrame.BorderSizePixel = 0
+chatFeedFrame.ScrollBarThickness = 3
+chatFeedFrame.ScrollBarImageColor3 = Theme.SURFACE_HOVER
+chatFeedFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+chatFeedFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+chatFeedFrame.LayoutOrder = 6
+chatFeedFrame.Parent = chatPage
+Instance.new("UICorner", chatFeedFrame).CornerRadius = Theme.CORNER_SM
+bindTheme(chatFeedFrame, "BackgroundColor3", "SURFACE")
+
+local chatFeedPad = Instance.new("UIPadding")
+chatFeedPad.PaddingTop = UDim.new(0, 4)
+chatFeedPad.PaddingBottom = UDim.new(0, 4)
+chatFeedPad.PaddingLeft = UDim.new(0, 6)
+chatFeedPad.PaddingRight = UDim.new(0, 6)
+chatFeedPad.Parent = chatFeedFrame
+
+local chatFeedLayout = Instance.new("UIListLayout")
+chatFeedLayout.SortOrder = Enum.SortOrder.LayoutOrder
+chatFeedLayout.Padding = UDim.new(0, 2)
+chatFeedLayout.Parent = chatFeedFrame
+
+local chatSearchRow = Instance.new("Frame")
+chatSearchRow.Size = UDim2.new(1, 0, 0, 32)
+chatSearchRow.BackgroundTransparency = 1
+chatSearchRow.LayoutOrder = 7
+chatSearchRow.Parent = chatPage
+
+local chatSearchBox = Instance.new("TextBox")
+chatSearchBox.Size = UDim2.new(1, 0, 1, 0)
+chatSearchBox.BackgroundColor3 = Theme.SURFACE
+chatSearchBox.BackgroundTransparency = 0.3
+chatSearchBox.BorderSizePixel = 0
+chatSearchBox.TextColor3 = Theme.TEXT
+chatSearchBox.PlaceholderText = "🔍  Search players..."
+chatSearchBox.PlaceholderColor3 = Theme.TEXT_MUTED
+chatSearchBox.Text = ""
+chatSearchBox.Font = Theme.FONT
+chatSearchBox.TextSize = 12
+chatSearchBox.ClearTextOnFocus = false
+chatSearchBox.TextXAlignment = Enum.TextXAlignment.Left
+chatSearchBox.Parent = chatSearchRow
+Instance.new("UICorner", chatSearchBox).CornerRadius = Theme.CORNER_SM
+bindTheme(chatSearchBox, "BackgroundColor3", "SURFACE")
+bindTheme(chatSearchBox, "TextColor3", "TEXT")
+
+-- THEME TAB
+local appearanceTab = createTab("Theme", "🎨")
+local appearancePage = appearanceTab.page
+
+makeLabel(appearancePage, "THEME PRESETS", 1, Theme.INFO)
+
+local presetRow1 = Instance.new("Frame")
+presetRow1.Size = UDim2.new(1, 0, 0, 32)
+presetRow1.BackgroundTransparency = 1
+presetRow1.LayoutOrder = 2
+presetRow1.Parent = appearancePage
+
+local presetRow2 = Instance.new("Frame")
+presetRow2.Size = UDim2.new(1, 0, 0, 32)
+presetRow2.BackgroundTransparency = 1
+presetRow2.LayoutOrder = 3
+presetRow2.Parent = appearancePage
+
+local presets = {
+    { name = "Midnight", bg = Color3.fromRGB(14, 14, 18), surface = Color3.fromRGB(24, 24, 30), surfaceAlt = Color3.fromRGB(34, 34, 42), accent = Color3.fromRGB(120, 140, 255), text = Color3.fromRGB(240, 240, 245), dim = Color3.fromRGB(160, 160, 175) },
+    { name = "Carbon",  bg = Color3.fromRGB(8, 8, 8), surface = Color3.fromRGB(20, 20, 20), surfaceAlt = Color3.fromRGB(30, 30, 30), accent = Color3.fromRGB(200, 200, 200), text = Color3.fromRGB(240, 240, 240), dim = Color3.fromRGB(150, 150, 150) },
+    { name = "Ocean",   bg = Color3.fromRGB(10, 20, 35), surface = Color3.fromRGB(18, 32, 50), surfaceAlt = Color3.fromRGB(28, 45, 65), accent = Color3.fromRGB(80, 190, 255), text = Color3.fromRGB(230, 245, 255), dim = Color3.fromRGB(150, 180, 200) },
+    { name = "Cherry",  bg = Color3.fromRGB(25, 12, 18), surface = Color3.fromRGB(40, 20, 28), surfaceAlt = Color3.fromRGB(55, 30, 42), accent = Color3.fromRGB(255, 100, 140), text = Color3.fromRGB(255, 235, 240), dim = Color3.fromRGB(200, 150, 165) },
+    { name = "Forest",  bg = Color3.fromRGB(12, 20, 14), surface = Color3.fromRGB(22, 34, 24), surfaceAlt = Color3.fromRGB(32, 48, 36), accent = Color3.fromRGB(120, 220, 140), text = Color3.fromRGB(230, 250, 235), dim = Color3.fromRGB(150, 190, 160) },
+    { name = "Purple",  bg = Color3.fromRGB(20, 12, 30), surface = Color3.fromRGB(32, 22, 45), surfaceAlt = Color3.fromRGB(45, 32, 62), accent = Color3.fromRGB(190, 130, 255), text = Color3.fromRGB(245, 235, 255), dim = Color3.fromRGB(180, 150, 210) },
+    { name = "Sunset",  bg = Color3.fromRGB(30, 18, 10), surface = Color3.fromRGB(48, 30, 18), surfaceAlt = Color3.fromRGB(65, 42, 25), accent = Color3.fromRGB(255, 170, 90), text = Color3.fromRGB(255, 240, 220), dim = Color3.fromRGB(200, 170, 140) },
+    { name = "Lavender",bg = Color3.fromRGB(26, 22, 34), surface = Color3.fromRGB(40, 34, 50), surfaceAlt = Color3.fromRGB(55, 46, 68), accent = Color3.fromRGB(200, 170, 255), text = Color3.fromRGB(240, 235, 250), dim = Color3.fromRGB(170, 160, 190) },
+}
+
+local function applyTheme()
+    for _, b in ipairs(_G.Prism_themeBindings or {}) do
+        pcall(function()
+            b.instance[b.prop] = Theme[b.key]
+        end)
+    end
+end
+
+local function applyPreset(p)
+    Theme.BG            = p.bg
+    Theme.SURFACE       = p.surface
+    Theme.SURFACE_ALT   = p.surfaceAlt
+    Theme.SURFACE_HOVER = p.surfaceAlt:Lerp(Color3.new(1, 1, 1), 0.15)
+    Theme.ACCENT        = p.accent
+    Theme.ACCENT_DARK   = p.accent:Lerp(Color3.new(0, 0, 0), 0.3)
+    Theme.TEXT          = p.text
+    Theme.TEXT_DIM      = p.dim
+    Theme.TEXT_MUTED    = p.dim:Lerp(p.surface, 0.4)
+    applyTheme()
+    setStatus("Theme: " .. p.name)
+    saveConfig()
+end
+
+for i, p in ipairs(presets) do
+    local row = (i <= 4) and presetRow1 or presetRow2
+    local idx = (i <= 4) and i or (i - 4)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.25, -4, 1, 0)
+    btn.Position = UDim2.new((idx - 1) * 0.25, 2, 0, 0)
+    btn.BackgroundColor3 = p.surface
+    btn.Text = p.name
+    btn.TextColor3 = p.accent
+    btn.Font = Theme.FONT_BOLD
+    btn.TextSize = 10
+    btn.Parent = row
+    Instance.new("UICorner", btn).CornerRadius = Theme.CORNER_SM
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = p.accent
+    stroke.Thickness = 1
+    stroke.Transparency = 0.5
+    stroke.Parent = btn
+
+    btn.MouseButton1Click:Connect(function()
+        applyPreset(p)
+    end)
+end
+
+makeDivider(appearancePage, 4)
+makeLabel(appearancePage, "CUSTOM — BACKGROUND", 5, Theme.INFO)
+
+local bgPreview = Instance.new("Frame")
+bgPreview.Size = UDim2.new(1, 0, 0, 24)
+bgPreview.BackgroundColor3 = Theme.BG
+bgPreview.BorderSizePixel = 0
+bgPreview.LayoutOrder = 6
+bgPreview.Parent = appearancePage
+Instance.new("UICorner", bgPreview).CornerRadius = Theme.CORNER_SM
+
+makeSlider(appearancePage, "Red",   0, 255, Theme.BG.R * 255, 7, function(v)
+    Theme.BG = Color3.fromRGB(v, Theme.BG.G * 255, Theme.BG.B * 255)
+    bgPreview.BackgroundColor3 = Theme.BG
+    for _, b in ipairs(_G.Prism_themeBindings or {}) do
+        if b.key == "BG" then b.instance[b.prop] = Theme.BG end
+    end
+end)
+makeSlider(appearancePage, "Green", 0, 255, Theme.BG.G * 255, 8, function(v)
+    Theme.BG = Color3.fromRGB(Theme.BG.R * 255, v, Theme.BG.B * 255)
+    bgPreview.BackgroundColor3 = Theme.BG
+    for _, b in ipairs(_G.Prism_themeBindings or {}) do
+        if b.key == "BG" then b.instance[b.prop] = Theme.BG end
+    end
+end)
+makeSlider(appearancePage, "Blue",  0, 255, Theme.BG.B * 255, 9, function(v)
+    Theme.BG = Color3.fromRGB(Theme.BG.R * 255, Theme.BG.G * 255, v)
+    bgPreview.BackgroundColor3 = Theme.BG
+    for _, b in ipairs(_G.Prism_themeBindings or {}) do
+        if b.key == "BG" then b.instance[b.prop] = Theme.BG end
+    end
+end)
+
+makeDivider(appearancePage, 10)
+makeLabel(appearancePage, "CUSTOM — ACCENT", 11, Theme.INFO)
+
+local accentPreview = Instance.new("Frame")
+accentPreview.Size = UDim2.new(1, 0, 0, 24)
+accentPreview.BackgroundColor3 = Theme.ACCENT
+accentPreview.BorderSizePixel = 0
+accentPreview.LayoutOrder = 12
+accentPreview.Parent = appearancePage
+Instance.new("UICorner", accentPreview).CornerRadius = Theme.CORNER_SM
+
+makeSlider(appearancePage, "Red",   0, 255, Theme.ACCENT.R * 255, 13, function(v)
+    Theme.ACCENT = Color3.fromRGB(v, Theme.ACCENT.G * 255, Theme.ACCENT.B * 255)
+    Theme.ACCENT_DARK = Theme.ACCENT:Lerp(Color3.new(0, 0, 0), 0.3)
+    accentPreview.BackgroundColor3 = Theme.ACCENT
+    for _, b in ipairs(_G.Prism_themeBindings or {}) do
+        if b.key == "ACCENT" then b.instance[b.prop] = Theme.ACCENT
+        elseif b.key == "ACCENT_DARK" then b.instance[b.prop] = Theme.ACCENT_DARK end
+    end
+end)
+makeSlider(appearancePage, "Green", 0, 255, Theme.ACCENT.G * 255, 14, function(v)
+    Theme.ACCENT = Color3.fromRGB(Theme.ACCENT.R * 255, v, Theme.ACCENT.B * 255)
+    Theme.ACCENT_DARK = Theme.ACCENT:Lerp(Color3.new(0, 0, 0), 0.3)
+    accentPreview.BackgroundColor3 = Theme.ACCENT
+    for _, b in ipairs(_G.Prism_themeBindings or {}) do
+        if b.key == "ACCENT" then b.instance[b.prop] = Theme.ACCENT
+        elseif b.key == "ACCENT_DARK" then b.instance[b.prop] = Theme.ACCENT_DARK end
+    end
+end)
+makeSlider(appearancePage, "Blue",  0, 255, Theme.ACCENT.B * 255, 15, function(v)
+    Theme.ACCENT = Color3.fromRGB(Theme.ACCENT.R * 255, Theme.ACCENT.G * 255, v)
+    Theme.ACCENT_DARK = Theme.ACCENT:Lerp(Color3.new(0, 0, 0), 0.3)
+    accentPreview.BackgroundColor3 = Theme.ACCENT
+    for _, b in ipairs(_G.Prism_themeBindings or {}) do
+        if b.key == "ACCENT" then b.instance[b.prop] = Theme.ACCENT
+        elseif b.key == "ACCENT_DARK" then b.instance[b.prop] = Theme.ACCENT_DARK end
+    end
+end)
+
+makeDivider(appearancePage, 16)
+makeLabel(appearancePage, "TRANSPARENCY", 17, Theme.INFO)
+
+makeSlider(appearancePage, "Window", 0, 0.9, Theme.BG_TRANSP, 18, function(v)
+    Theme.BG_TRANSP = v
+    main.BackgroundTransparency = v
+end)
+
+makeDivider(appearancePage, 19)
+makeLabel(appearancePage, "CONFIG", 20, Theme.INFO)
+
+local saveBtn = makeButton(appearancePage, "💾  Save Config", Theme.SUCCESS, 21)
+local loadBtn = makeButton(appearancePage, "📂  Load Config", Theme.ACCENT_DARK, 22)
+local resetCfgBtn = makeButton(appearancePage, "🗑️  Reset Config", Theme.DANGER, 23)
+
+saveBtn.MouseButton1Click:Connect(function()
+    saveConfig()
+    setStatus("Config saved")
+end)
+loadBtn.MouseButton1Click:Connect(function()
+    local cfg = loadConfig()
+    if not cfg then setStatus("No config found"); return end
+    if cfg.theme then
+        for k, v in pairs(cfg.theme) do
+            if type(v) == "table" and Theme[k] then
+                Theme[k] = tableToColor(v)
+            end
+        end
+    end
+    if cfg.transparency then
+        Theme.BG_TRANSP = cfg.transparency
+        main.BackgroundTransparency = cfg.transparency
+    end
+    applyTheme()
+    setStatus("Config loaded")
+end)
+resetCfgBtn.MouseButton1Click:Connect(function()
+    deleteConfig()
+    applyPreset(presets[1])
+    main.BackgroundTransparency = 0.1
+    Theme.BG_TRANSP = 0.1
+    setStatus("Config reset")
+end)
+
+-- UTIL TAB
+local utilTab = createTab("Util", "⚙️")
+local utilPage = utilTab.page
+makeLabel(utilPage, "QUICK ACTIONS", 1, Theme.INFO)
+local resetBtn = makeButton(utilPage, "🔄  Reset Character", Theme.SURFACE_ALT, 2)
+local refreshBtn = makeButton(utilPage, "🔁  Refresh Floor Ref", Theme.SURFACE_ALT, 3)
+
+-- POPUP
+local popupGui = Instance.new("ScreenGui")
+popupGui.Name = "PrismPopup"
+popupGui.ResetOnSpawn = false
+popupGui.IgnoreGuiInset = true
+popupGui.Parent = player:WaitForChild("PlayerGui")
+
+local popup = Instance.new("Frame")
+popup.Size = UDim2.new(0, 380, 0, 340)
+popup.Position = UDim2.new(0, 100, 0, 100)
+popup.BackgroundColor3 = Theme.BG
+popup.BackgroundTransparency = Theme.BG_TRANSP
+popup.BorderSizePixel = 0
+popup.Active = true
+popup.Visible = false
+popup.Parent = popupGui
+Instance.new("UICorner", popup).CornerRadius = UDim.new(0, 10)
+bindTheme(popup, "BackgroundColor3", "BG")
+bindTheme(popup, "BackgroundTransparency", "BG_TRANSP")
+
+local popupStroke = Instance.new("UIStroke")
+popupStroke.Color = Color3.fromRGB(60, 60, 78)
+popupStroke.Thickness = 1
+popupStroke.Transparency = 0.4
+popupStroke.Parent = popup
+
+local popupHeader = Instance.new("Frame")
+popupHeader.Size = UDim2.new(1, 0, 0, 34)
+popupHeader.BackgroundColor3 = Theme.SURFACE
+popupHeader.BackgroundTransparency = 0.15
+popupHeader.BorderSizePixel = 0
+popupHeader.Parent = popup
+Instance.new("UICorner", popupHeader).CornerRadius = UDim.new(0, 10)
+bindTheme(popupHeader, "BackgroundColor3", "SURFACE")
+
+local popupTitle = Instance.new("TextLabel")
+popupTitle.Size = UDim2.new(1, -40, 1, 0)
+popupTitle.Position = UDim2.new(0, 14, 0, 0)
+popupTitle.BackgroundTransparency = 1
+popupTitle.Text = "Player Info"
+popupTitle.TextColor3 = Theme.TEXT
+popupTitle.Font = Theme.FONT_BOLD
+popupTitle.TextSize = 14
+popupTitle.TextXAlignment = Enum.TextXAlignment.Left
+popupTitle.Parent = popupHeader
+bindTheme(popupTitle, "TextColor3", "TEXT")
+
+local popupClose = Instance.new("TextButton")
+popupClose.Size = UDim2.new(0, 22, 0, 22)
+popupClose.Position = UDim2.new(1, -28, 0.5, -11)
+popupClose.BackgroundColor3 = Theme.SURFACE_ALT
+popupClose.Text = "✕"
+popupClose.TextColor3 = Theme.DANGER
+popupClose.Font = Theme.FONT_BOLD
+popupClose.TextSize = 12
+popupClose.Parent = popupHeader
+Instance.new("UICorner", popupClose).CornerRadius = UDim.new(0, 5)
+bindTheme(popupClose, "BackgroundColor3", "SURFACE_ALT")
+
+local popupScroll = Instance.new("ScrollingFrame")
+popupScroll.Size = UDim2.new(1, -20, 1, -54)
+popupScroll.Position = UDim2.new(0, 10, 0, 44)
+popupScroll.BackgroundTransparency = 1
+popupScroll.BorderSizePixel = 0
+popupScroll.ScrollBarThickness = 3
+popupScroll.ScrollBarImageColor3 = Theme.SURFACE_HOVER
+popupScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+popupScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+popupScroll.Parent = popup
+
+local popupLayout = Instance.new("UIListLayout")
+popupLayout.SortOrder = Enum.SortOrder.LayoutOrder
+popupLayout.Padding = UDim.new(0, 4)
+popupLayout.Parent = popupScroll
+
+local popupBody = Instance.new("TextLabel")
+popupBody.Size = UDim2.new(1, 0, 0, 200)
+popupBody.BackgroundTransparency = 1
+popupBody.Text = ""
+popupBody.TextColor3 = Theme.TEXT
+popupBody.Font = Theme.FONT_MONO
+popupBody.TextSize = 12
+popupBody.TextXAlignment = Enum.TextXAlignment.Left
+popupBody.TextYAlignment = Enum.TextYAlignment.Top
+popupBody.TextWrapped = true
+popupBody.Parent = popupScroll
+bindTheme(popupBody, "TextColor3", "TEXT")
+
+popupClose.MouseButton1Click:Connect(function()
+    popup.Visible = false
+end)
+
+do
+    local dragging, dragStart, startPos
+    popupHeader.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = popup.Position
+        end
+    end)
+    popupHeader.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if not dragging then return end
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
+            local delta = input.Position - dragStart
+            popup.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+end
+
+-- STATE + TAB SWITCHING
+local state = {
+    mode = "sidebar",
+    openTab = nil,
+    locked = false,
+}
+
+local function applySidebarActive(tab, active)
+    tab.sidebarBtn.BackgroundColor3 = active and Theme.ACCENT or Theme.SURFACE
+    tab.sidebarBtn.BackgroundTransparency = active and 0.15 or 0.5
+    tab.sidebarBtn.TextColor3 = active and Theme.TEXT or Theme.TEXT_DIM
+    tab.accent.Visible = active
+end
+
+local function applyTopActive(tab, active)
+    tab.topBtn.BackgroundColor3 = active and Theme.ACCENT or Theme.SURFACE
+    tab.topBtn.BackgroundTransparency = active and 0.15 or 0.5
+    tab.topBtn.TextColor3 = active and Theme.TEXT or Theme.TEXT_DIM
+end
+
+local function hideAllPages()
+    for _, t in ipairs(tabOrder) do
+        t.page.Visible = false
+    end
+end
+
+local function showPageFancy(page)
+    page.Visible = true
+    page.Position = UDim2.new(0, 12, 0, 20)
+    TweenService:Create(page, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        Position = UDim2.new(0, 12, 0, 12)
+    }):Play()
+end
+
+local function closeSidebarPanel(animate)
+    for _, t in ipairs(tabOrder) do
+        applySidebarActive(t, false)
+    end
+    state.openTab = nil
+    if animate then
+        for _, t in ipairs(tabOrder) do
+            if t.page.Visible then
+                TweenService:Create(t.page, TweenInfo.new(0.15), {
+                    Position = UDim2.new(0, 30, 0, 12),
+                }):Play()
+                local p = t.page
+                task.delay(0.15, function() p.Visible = false end)
+            end
+        end
+        TweenService:Create(main, TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Size = UDim2.new(0, SIDEBAR_W, 0, main.AbsoluteSize.Y)
+        }):Play()
+        task.delay(0.3, clampToScreen)
+    else
+        hideAllPages()
+    end
+end
+
+local function openSidebarPanel(tabName)
+    hideAllPages()
+    for _, t in ipairs(tabOrder) do
+        applySidebarActive(t, t.name == tabName)
+    end
+    state.openTab = tabName
+    TweenService:Create(main, TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        Size = UDim2.new(0, SIDEBAR_W + PANEL_W, 0, main.AbsoluteSize.Y)
+    }):Play()
+    task.delay(0.1, function()
+        local t = tabs[tabName]
+        if t then showPageFancy(t.page) end
+    end)
+    task.delay(0.3, clampToScreen)
+end
+
+local function switchSidebarTab(newTab)
+    if state.openTab == newTab then
+        closeSidebarPanel(true)
+        return
+    end
+    if state.openTab == nil then
+        openSidebarPanel(newTab)
+        return
+    end
+    for _, t in ipairs(tabOrder) do
+        if t.page.Visible then
+            TweenService:Create(t.page, TweenInfo.new(0.15), {
+                Position = UDim2.new(0, 30, 0, 12),
+            }):Play()
+        end
+    end
+    task.delay(0.15, function()
+        hideAllPages()
+        for _, t in ipairs(tabOrder) do
+            applySidebarActive(t, t.name == newTab)
+        end
+        state.openTab = newTab
+        local t = tabs[newTab]
+        if t then showPageFancy(t.page) end
+    end)
+end
+
+local function switchToTopTabs()
+    closeSidebarPanel(false)
+    state.mode = "toptabs"
+    for _, t in ipairs(tabOrder) do
+        t.sidebarBtn.Visible = false
+        t.accent.Visible = false
+    end
+    sidebar.Visible = false
+    topTabBar.Visible = true
+    topTabDivider.Visible = true
+    for _, t in ipairs(tabOrder) do
+        t.topBtn.Visible = true
+    end
+    panel.Size = UDim2.new(1, 0, 1, -134)
+    panel.Position = UDim2.new(0, 0, 0, 100)
+    TweenService:Create(main, TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        Size = UDim2.new(0, TOP_TAB_W, 0, main.AbsoluteSize.Y)
+    }):Play()
+    task.delay(0.3, clampToScreen)
+    task.delay(0.28, function()
+        local firstTab = tabOrder[1]
+        if firstTab then
+            hideAllPages()
+            for _, t in ipairs(tabOrder) do
+                applyTopActive(t, t.name == firstTab.name)
+            end
+            firstTab.page.Visible = true
+            state.openTab = firstTab.name
+        end
+    end)
+end
+
+local function switchToSidebar()
+    topTabBar.Visible = false
+    topTabDivider.Visible = false
+    for _, t in ipairs(tabOrder) do
+        t.topBtn.Visible = false
+    end
+    sidebar.Visible = true
+    for _, t in ipairs(tabOrder) do
+        t.sidebarBtn.Visible = true
+    end
+    panel.Size = UDim2.new(0, PANEL_W, 1, -84)
+    panel.Position = UDim2.new(0, SIDEBAR_W, 0, 44)
+    hideAllPages()
+    state.openTab = nil
+    state.mode = "sidebar"
+    TweenService:Create(main, TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        Size = UDim2.new(0, SIDEBAR_W, 0, main.AbsoluteSize.Y)
+    }):Play()
+    task.delay(0.3, clampToScreen)
+end
+
+for _, t in ipairs(tabOrder) do
+    t.sidebarBtn.MouseButton1Click:Connect(function()
+        if state.locked or state.mode ~= "sidebar" then return end
+        switchSidebarTab(t.name)
+    end)
+    t.topBtn.MouseButton1Click:Connect(function()
+        if state.locked or state.mode ~= "toptabs" then return end
+        hideAllPages()
+        for _, t2 in ipairs(tabOrder) do
+            applyTopActive(t2, t2.name == t.name)
+        end
+        t.page.Visible = true
+        state.openTab = t.name
+    end)
+end
+
+layoutToggle.MouseButton1Click:Connect(function()
+    if state.locked then return end
+    state.locked = true
+    if state.mode == "sidebar" then
+        switchToTopTabs()
+        layoutToggle.TextColor3 = Theme.WARNING
+    else
+        switchToSidebar()
+        layoutToggle.TextColor3 = Theme.ACCENT
+    end
+    task.wait(0.4)
+    state.locked = false
+end)
+
+local header = P.header
+local dragging, dragStart, startPos
+header.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+    or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = main.Position
+    end
+end)
+header.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+    or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+        clampToScreen()
+        saveConfig()
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if not dragging then return end
+    if input.UserInputType == Enum.UserInputType.MouseMovement
+    or input.UserInputType == Enum.UserInputType.Touch then
+        local delta = input.Position - dragStart
+        main.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+local minimized = false
+minBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    if minimized then
+        sidebar.Visible = false
+        panel.Visible = false
+        topTabBar.Visible = false
+        topTabDivider.Visible = false
+        status.Visible = false
+        TweenService:Create(main, TweenInfo.new(0.2), {
+            Size = UDim2.new(main.Size.X.Scale, main.Size.X.Offset, 0, 44)
+        }):Play()
+        task.delay(0.22, clampToScreen)
+        minBtn.Text = "+"
+    else
+        local targetW
+        if state.mode == "sidebar" then
+            targetW = state.openTab and (SIDEBAR_W + PANEL_W) or SIDEBAR_W
+        else
+            targetW = TOP_TAB_W
+        end
+        TweenService:Create(main, TweenInfo.new(0.2), {
+            Size = UDim2.new(0, targetW, 0, WINDOW_H)
+        }):Play()
+        task.delay(0.2, function()
+            if not minimized then
+                if state.mode == "sidebar" then
+                    sidebar.Visible = true
+                else
+                    topTabBar.Visible = true
+                    topTabDivider.Visible = true
+                end
+                panel.Visible = true
+                status.Visible = true
+                clampToScreen()
+            end
+        end)
+        minBtn.Text = "—"
+    end
+end)
+
+local closing = false
+closeBtn.MouseButton1Click:Connect(function()
+    if closing then return end
+    closing = true
+    main.Active = false
+    saveConfig()
+    local fadeInfo = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+    TweenService:Create(main, fadeInfo, {
+        Size = UDim2.new(0, 200, 0, 200),
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0.5, 0, 0.5, 20)
+    }):Play()
+    TweenService:Create(mainStroke, fadeInfo, { Transparency = 1 }):Play()
+    for _, obj in ipairs(main:GetDescendants()) do
+        if obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox") then
+            pcall(function()
+                TweenService:Create(obj, fadeInfo, { TextTransparency = 1, BackgroundTransparency = 1 }):Play()
+            end)
+        elseif obj:IsA("Frame") then
+            pcall(function()
+                TweenService:Create(obj, fadeInfo, { BackgroundTransparency = 1 }):Play()
+            end)
+        end
+    end
+    task.wait(0.28)
+    screenGui:Destroy()
+end)
+
+closeSidebarPanel(false)
+
+P.randomRoleBtn = randomRoleBtn
+P.undoRoleBtn = undoRoleBtn
+P.historyBox = historyBox
+P.refreshInfoBtn = refreshInfoBtn
+P.infoCountLbl = infoCountLbl
+P.playerListFrame = playerListFrame
+P.searchBox = searchBox
+P.chatPauseBtn = chatPauseBtn
+P.chatClearBtn = chatClearBtn
+P.chatPinBtn = chatPinBtn
+P.chatPlayerListFrame = chatPlayerListFrame
+P.chatFeedFrame = chatFeedFrame
+P.chatSearchBox = chatSearchBox
+P.resetBtn = resetBtn
+P.refreshBtn = refreshBtn
+P.popup = popup
+P.popupTitle = popupTitle
+P.popupBody = popupBody
+P.popupScroll = popupScroll
+
+print("✅ PRISM v25 — Chunk 1B loaded (full UI ready)")
+
+end
+
+--[[
+    PRISM — v25
+    CHUNK 2 — Spawn, Look, Roles, Util logic
+]]
+
+do
+
+local P = _G.Prism
+
+local Theme          = P.Theme
+local setStatus      = P.setStatus
+local fireRemote     = P.fireRemote
+local OfficeAction   = P.OfficeAction
+local SetSkinTone    = P.SetSkinTone
+local SubmitRPName   = P.SubmitRPName
+local SetFace        = P.SetFace
+local UpdateRole     = P.UpdateRole
+local RPNameConfig   = P.RPNameConfig
+local player         = P.player
+local mouse          = P.mouse
+local currentColor   = P.currentColor
+local directionModes = P.directionModes
+local historyBox     = P.historyBox
+local multiToggle    = P.multiToggle
+local multiPickup    = P.multiPickup
+local singleUID      = P.singleUID
+local singleToggle   = P.singleToggle
+local singlePickup   = P.singlePickup
+local targetBox      = P.targetBox
+local targetUID1     = P.targetUID1
+local targetUID2     = P.targetUID2
+local targetDelay    = P.targetDelay
+local targetSpacing  = P.targetSpacing
+local targetYOffset  = P.targetYOffset
+local dirBtn         = P.dirBtn
+local placeBtn       = P.placeBtn
+local targetPickup   = P.targetPickup
+local targetLoop     = P.targetLoop
+local lightTargetBox = P.lightTargetBox
+local lightUIDList   = P.lightUIDList
+local lightCount     = P.lightCount
+local lightRadius    = P.lightRadius
+local lightModeBtn   = P.lightModeBtn
+local lightTrackBtn  = P.lightTrackBtn
+local lightBarrageBtn = P.lightBarrageBtn
+local lightCleanupBtn = P.lightCleanupBtn
+local lightModes     = P.lightModes
+local decalInput     = P.decalInput
+local decalApply     = P.decalApply
+local nameToggle     = P.nameToggle
+local skinApply      = P.skinApply
+local skinRandom     = P.skinRandom
+local randomRoleBtn  = P.randomRoleBtn
+local undoRoleBtn    = P.undoRoleBtn
+local resetBtn       = P.resetBtn
+local refreshBtn     = P.refreshBtn
+local sliderRefs     = P.sliderRefs
+local floorPart      = P.floorPart
+local getFloorPart   = P.getFloorPart
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+-- SPAWN LOGIC
+local placedItems = {}
+local multiMode = false
+
+local function getSpiralPositions(center, spacing, count)
+    local positions = {}
+    local x, z = 0, 0
+    local dx, dz = 0, -1
+    for i = 1, count do
+        positions[i] = center + Vector3.new(x * spacing, 0, z * spacing)
+        if (x == z) or (x < 0 and x == -z) or (x > 0 and x == 1 - z) then
+            local t = dx; dx = -dz; dz = t
+        end
+        x = x + dx; z = z + dz
+    end
+    return positions
+end
+
+local function spawnAllUIDs(origin)
+    if not OfficeAction then setStatus("No remote"); return end
+    placedItems = {}
+    local positions = getSpiralPositions(origin, 5, 100)
+    local placed, failed = 0, 0
+    for i = 1, 100 do
+        local pos = positions[i]
+        if not pos then break end
+        local uidStr = tostring(i)
+        local ok = pcall(function()
+            fireRemote(OfficeAction, "PlaceFurniture", {
+                targetPart = floorPart, uid = uidStr,
+                hitPosition = pos, rotationY = 0,
+                ghostCFrame = CFrame.new(pos),
+                hitNormal = Vector3.new(0, 1, 0)
+            })
+        end)
+        if ok then
+            placed = placed + 1
+            table.insert(placedItems, { uid = uidStr, pos = pos })
+        else
+            failed = failed + 1
+        end
+        task.wait(0.05)
+    end
+    setStatus("Placed: " .. placed .. " | Failed: " .. failed)
+end
+
+local function pickupAllMulti()
+    if not OfficeAction then setStatus("No remote"); return end
+    if #placedItems == 0 then setStatus("Nothing to pick up"); return end
+    local picked = 0
+    for _, item in ipairs(placedItems) do
+        pcall(function()
+            fireRemote(OfficeAction, "PickupFurniture", {
+                worldPosition = item.pos, uid = item.uid,
+                modelName = "Furniture", tier = "Standard"
+            })
+            picked = picked + 1
+        end)
+        task.wait(0.05)
+    end
+    placedItems = {}
+    setStatus("Picked up: " .. picked)
+end
+
+multiToggle.MouseButton1Click:Connect(function()
+    multiMode = not multiMode
+    if multiMode then
+        multiToggle.BackgroundColor3 = Theme.SUCCESS
+        multiToggle.Text = "🟢  Click Ground"
+        setStatus("Click ground to spawn all")
+    else
+        multiToggle.BackgroundColor3 = Theme.SURFACE_ALT
+        multiToggle.Text = "Spawn All"
+        setStatus("Ready")
+    end
+end)
+
+multiPickup.MouseButton1Click:Connect(pickupAllMulti)
+
+local singleMode = false
+local lastPlacedPos
+
+singleToggle.MouseButton1Click:Connect(function()
+    singleMode = not singleMode
+    if singleMode then
+        singleToggle.BackgroundColor3 = Theme.SUCCESS
+        singleToggle.Text = "🟢 ON"
+        setStatus("Click ground to place")
+    else
+        singleToggle.BackgroundColor3 = Theme.SURFACE_ALT
+        singleToggle.Text = "OFF"
+        setStatus("Ready")
+    end
+end)
+
+singlePickup.MouseButton1Click:Connect(function()
+    if not OfficeAction then setStatus("No remote"); return end
+    if not lastPlacedPos then setStatus("Nothing to pickup"); return end
+    local uid = singleUID.Text ~= "" and singleUID.Text or "9"
+    pcall(function()
+        fireRemote(OfficeAction, "PickupFurniture", {
+            worldPosition = lastPlacedPos, uid = uid,
+            modelName = "Furniture", tier = "Standard"
+        })
+    end)
+    lastPlacedPos = nil
+    setStatus("Picked up UID " .. uid)
+end)
+
+mouse.Button1Down:Connect(function()
+    if not (multiMode or singleMode) then return end
+    local cam = workspace.CurrentCamera
+    if not cam then return end
+    local unitRay = cam:ViewportPointToRay(mouse.X, mouse.Y, 1)
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {player.Character}
+    params.IgnoreWater = true
+    local result = workspace:Raycast(unitRay.Origin, unitRay.Direction * 1000, params)
+    if not result then setStatus("No surface"); return end
+    local pos = result.Position
+    if multiMode then
+        setStatus("Spawning...")
+        spawnAllUIDs(pos)
+    elseif singleMode then
+        if not OfficeAction then setStatus("No remote"); return end
+        local uid = singleUID.Text ~= "" and singleUID.Text or "9"
+        local placePos = Vector3.new(pos.X, pos.Y + 0.5, pos.Z)
+        pcall(function()
+            fireRemote(OfficeAction, "PlaceFurniture", {
+                targetPart = floorPart, uid = uid,
+                hitPosition = placePos, rotationY = 0,
+                ghostCFrame = CFrame.new(placePos),
+                hitNormal = Vector3.new(0, 1, 0)
+            })
+        end)
+        lastPlacedPos = placePos
+        setStatus("Spawned UID " .. uid)
+    end
+end)
+
+local targetRunning = false
+local lastPlaced = { uid1 = nil, uid2 = nil }
+
+local function getTargetPositions(targetPlayer, spacing, yOffset)
+    if not targetPlayer or not targetPlayer.Character then return nil end
+    local char = targetPlayer.Character
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+    local basePos = hrp.Position
+    local pos1 = Vector3.new(basePos.X, basePos.Y + 0.5, basePos.Z)
+    local mode = "Right"
+    local modeName = dirBtn.Text:match("▶ (%w+)")
+    if modeName then mode = modeName end
+    if mode == "Above" then
+        local head = char:FindFirstChild("Head")
+        local origin = head and head.Position or basePos
+        return pos1, Vector3.new(origin.X, origin.Y + yOffset, origin.Z)
+    end
+    if mode == "Beneath" then
+        return pos1, Vector3.new(basePos.X, basePos.Y + yOffset, basePos.Z)
+    end
+    local cframe = hrp.CFrame
+    local forward = cframe.LookVector
+    local right = cframe.RightVector
+    local offsetVec
+    if mode == "Right" then offsetVec = right * spacing
+    elseif mode == "Left" then offsetVec = -right * spacing
+    elseif mode == "Front" then offsetVec = forward * spacing
+    elseif mode == "Back" then offsetVec = -forward * spacing
+    else offsetVec = Vector3.new(spacing, 0, 0) end
+    offsetVec = Vector3.new(offsetVec.X, 0, offsetVec.Z)
+    return pos1, Vector3.new(
+        basePos.X + offsetVec.X,
+        basePos.Y + yOffset,
+        basePos.Z + offsetVec.Z
+    )
+end
+
+local function placeUIDAt(uid, position)
+    if not uid or uid == "" then return false end
+    return pcall(function()
+        fireRemote(OfficeAction, "PlaceFurniture", {
+            targetPart = floorPart, uid = uid,
+            hitPosition = position, rotationY = 0,
+            ghostCFrame = CFrame.new(position),
+            hitNormal = Vector3.new(0, 1, 0)
+        })
+    end)
+end
+
+local function pickupUIDAt(uid, position)
+    if not uid or uid == "" or not position then return false end
+    return pcall(function()
+        fireRemote(OfficeAction, "PickupFurniture", {
+            worldPosition = position, uid = uid,
+            modelName = "Furniture", tier = "Standard"
+        })
+    end)
+end
+
+local function placeBothOnTarget(targetPlayer, spacing, yOffset)
+    local pos1, pos2 = getTargetPositions(targetPlayer, spacing, yOffset)
+    if not pos1 then return false end
+    local uid1 = targetUID1.Text ~= "" and targetUID1.Text or nil
+    local uid2 = targetUID2.Text ~= "" and targetUID2.Text or nil
+    local anyPlaced = false
+    if uid1 then
+        if placeUIDAt(uid1, pos1) then
+            lastPlaced.uid1 = { uid = uid1, pos = pos1 }
+            anyPlaced = true
+        end
+    end
+    if uid2 then
+        if placeUIDAt(uid2, pos2) then
+            lastPlaced.uid2 = { uid = uid2, pos = pos2 }
+            anyPlaced = true
+        end
+    end
+    return anyPlaced
+end
+
+local function pickupBoth()
+    if lastPlaced.uid1 then
+        pickupUIDAt(lastPlaced.uid1.uid, lastPlaced.uid1.pos)
+        lastPlaced.uid1 = nil
+    end
+    if lastPlaced.uid2 then
+        pickupUIDAt(lastPlaced.uid2.uid, lastPlaced.uid2.pos)
+        lastPlaced.uid2 = nil
+    end
+end
+
+placeBtn.MouseButton1Click:Connect(function()
+    if not OfficeAction then setStatus("No remote"); return end
+    local t = Players:FindFirstChild(targetBox.Text)
+    if not t then setStatus("Player not found"); return end
+    local spacing = math.clamp(tonumber(targetSpacing.Text) or 4, 0, 50)
+    local yOffset = tonumber(targetYOffset.Text) or 0.5
+    local ok = placeBothOnTarget(t, spacing, yOffset)
+    setStatus(ok and ("Placed on " .. t.Name) or "Nothing placed")
+end)
+
+targetPickup.MouseButton1Click:Connect(function()
+    if not OfficeAction then setStatus("No remote"); return end
+    pickupBoth()
+    setStatus("Pickup fired")
+end)
+
+targetLoop.MouseButton1Click:Connect(function()
+    if targetRunning then
+        targetRunning = false
+        targetLoop.Text = "▶ Loop"
+        targetLoop.BackgroundColor3 = Theme.SUCCESS
+        setStatus("Loop stopped")
+        return
+    end
+    local t = Players:FindFirstChild(targetBox.Text)
+    if not t then setStatus("Player not found"); return end
+    local delay = math.clamp(tonumber(targetDelay.Text) or 0.5, 0.05, 60)
+    local spacing = math.clamp(tonumber(targetSpacing.Text) or 4, 0, 50)
+    local yOffset = tonumber(targetYOffset.Text) or 0.5
+    targetRunning = true
+    targetLoop.Text = "⏹ Stop"
+    targetLoop.BackgroundColor3 = Theme.DANGER
+    setStatus("Looping on " .. t.Name)
+    task.spawn(function()
+        while targetRunning do
+            local target = Players:FindFirstChild(targetBox.Text) or t
+            local liveSpacing = math.clamp(tonumber(targetSpacing.Text) or spacing, 0, 50)
+            local liveY = tonumber(targetYOffset.Text) or yOffset
+            placeBothOnTarget(target, liveSpacing, liveY)
+            task.wait(delay)
+            if OfficeAction then pickupBoth() end
+            task.wait(math.max(0.05, delay * 0.2))
+        end
+        if OfficeAction then pickupBoth() end
+    end)
+end)
+
+-- LIGHT BARRAGE
+local lightPlaced = {}
+local lightTrackRunning = false
+local lightTrackConn = nil
+
+local function parseUIDList(text)
+    local list = {}
+    for uid in string.gmatch(text, "[^,%s]+") do
+        if uid ~= "" then table.insert(list, uid) end
+    end
+    return list
+end
+
+local function randomSpherePoint(center, r)
+    local theta = math.random() * math.pi * 2
+    local phi = math.acos(2 * math.random() - 1)
+    local rr = r * (math.random() ^ (1/3))
+    return center + Vector3.new(
+        rr * math.sin(phi) * math.cos(theta),
+        rr * math.cos(phi),
+        rr * math.sin(phi) * math.sin(theta)
+    )
+end
+
+local function randomDomePoint(center, r)
+    local theta = math.random() * math.pi * 2
+    local phi = math.acos(math.random())
+    local rr = r * (math.random() ^ (1/3))
+    return center + Vector3.new(
+        rr * math.sin(phi) * math.cos(theta),
+        rr * math.cos(phi),
+        rr * math.sin(phi) * math.sin(theta)
+    )
+end
+
+local function randomTightPoint(center, r)
+    local theta = math.random() * math.pi * 2
+    local phi = math.acos(2 * math.random() - 1)
+    local rr = (r * 0.4) * math.random()
+    return center + Vector3.new(
+        rr * math.sin(phi) * math.cos(theta),
+        rr * math.cos(phi),
+        rr * math.sin(phi) * math.sin(theta)
+    )
+end
+
+local function getLightTargetHRP()
+    local name = lightTargetBox.Text
+    if name == "" then return nil end
+    local t = Players:FindFirstChild(name)
+    if not t or not t.Character then return nil end
+    return t.Character:FindFirstChild("HumanoidRootPart")
+end
+
+local function placeLight(uid, pos)
+    pcall(function()
+        fireRemote(OfficeAction, "PlaceFurniture", {
+            targetPart = floorPart, uid = tostring(uid),
+            hitPosition = pos, rotationY = 0,
+            ghostCFrame = CFrame.new(pos),
+            hitNormal = Vector3.new(0, 1, 0)
+        })
+    end)
+    table.insert(lightPlaced, { uid = tostring(uid), pos = pos })
+end
+
+lightBarrageBtn.MouseButton1Click:Connect(function()
+    if not OfficeAction then setStatus("No remote"); return end
+    local hrp = getLightTargetHRP()
+    if not hrp then setStatus("Target not found"); return end
+    local uids = parseUIDList(lightUIDList.Text)
+    if #uids == 0 then setStatus("No UIDs"); return end
+    local count = math.clamp(tonumber(lightCount.Text) or 5, 1, 200)
+    local radius = math.clamp(tonumber(lightRadius.Text) or 6, 1, 200)
+    local mode = "Sphere"
+    local modeName = lightModeBtn.Text:match("◉ (%w+)")
+    if modeName then mode = modeName end
+    local center = hrp.Position
+    setStatus(string.format("Barrage: %d UIDs × %d @ %d", #uids, count, radius))
+    for _, uid in ipairs(uids) do
+        for _ = 1, count do
+            local pos
+            if mode == "Sphere" then pos = randomSpherePoint(center, radius)
+            elseif mode == "Dome" then pos = randomDomePoint(center, radius)
+            else pos = randomTightPoint(center, radius) end
+            placeLight(uid, pos)
+            task.wait(0.02)
+        end
+    end
+    setStatus("Barrage done | placed " .. #lightPlaced)
+end)
+
+lightCleanupBtn.MouseButton1Click:Connect(function()
+    if not OfficeAction then setStatus("No remote"); return end
+    if #lightPlaced == 0 then setStatus("Nothing to clean"); return end
+    local count = 0
+    for _, item in ipairs(lightPlaced) do
+        pcall(function()
+            fireRemote(OfficeAction, "PickupFurniture", {
+                worldPosition = item.pos, uid = item.uid,
+                modelName = "Furniture", tier = "Standard"
+            })
+            count = count + 1
+        end)
+        task.wait(0.03)
+    end
+    lightPlaced = {}
+    setStatus("Cleaned up: " .. count)
+end)
+
+lightTrackBtn.MouseButton1Click:Connect(function()
+    if lightTrackRunning then
+        lightTrackRunning = false
+        if lightTrackConn then lightTrackConn:Disconnect(); lightTrackConn = nil end
+        lightTrackBtn.BackgroundColor3 = Theme.SURFACE_ALT
+        lightTrackBtn.Text = "Track OFF"
+        setStatus("Track stopped")
+        return
+    end
+    local hrp = getLightTargetHRP()
+    if not hrp then setStatus("Target not found"); return end
+    local uids = parseUIDList(lightUIDList.Text)
+    if #uids == 0 then setStatus("No UIDs"); return end
+    lightTrackRunning = true
+    lightTrackBtn.BackgroundColor3 = Theme.SUCCESS
+    lightTrackBtn.Text = "Track ON"
+    setStatus("Tracking...")
+    local uidIndex = 1
+    lightTrackConn = RunService.Heartbeat:Connect(function()
+        if not lightTrackRunning then return end
+        local target = getLightTargetHRP()
+        if not target then return end
+        local radius = math.clamp(tonumber(lightRadius.Text) or 6, 1, 200)
+        local mode = "Sphere"
+        local modeName = lightModeBtn.Text:match("◉ (%w+)")
+        if modeName then mode = modeName end
+        local center = target.Position
+        local uid = uids[uidIndex]
+        uidIndex = uidIndex + 1
+        if uidIndex > #uids then uidIndex = 1 end
+        local pos
+        if mode == "Sphere" then pos = randomSpherePoint(center, radius)
+        elseif mode == "Dome" then pos = randomDomePoint(center, radius)
+        else pos = randomTightPoint(center, radius) end
+        placeLight(uid, pos)
+    end)
+end)
+
+-- LOOK LOGIC
+skinApply.MouseButton1Click:Connect(function()
+    if not SetSkinTone then setStatus("No SetSkinTone remote"); return end
+    local ok, err = fireRemote(SetSkinTone, Color3.fromRGB(currentColor.R, currentColor.G, currentColor.B))
+    if ok then
+        setStatus(string.format("Applied RGB(%d, %d, %d)", currentColor.R, currentColor.G, currentColor.B))
+    else
+        setStatus("Skin err: " .. tostring(err))
+    end
+end)
+
+skinRandom.MouseButton1Click:Connect(function()
+    local r, g, b = math.random(0, 255), math.random(0, 255), math.random(0, 255)
+    currentColor.R, currentColor.G, currentColor.B = r, g, b
+    if sliderRefs.R then sliderRefs.R.setValue(r) end
+    if sliderRefs.G then sliderRefs.G.setValue(g) end
+    if sliderRefs.B then sliderRefs.B.setValue(b) end
+    if SetSkinTone then
+        fireRemote(SetSkinTone, Color3.fromRGB(r, g, b))
+    end
+    setStatus(string.format("Random RGB(%d, %d, %d)", r, g, b))
+end)
+
+local function extractAssetId(text)
+    return text:match("%d+")
+end
+
+decalApply.MouseButton1Click:Connect(function()
+    if not SetFace then setStatus("No SetFace remote"); return end
+    local raw = decalInput.Text
+    if raw == "" then setStatus("Enter decal ID"); return end
+    local id = extractAssetId(raw)
+    if not id then setStatus("Invalid decal ID"); return end
+    local formats = {
+        "rbxassetid://" .. id,
+        tonumber(id),
+        "http://www.roblox.com/asset/?id=" .. id,
+    }
+    for _, val in ipairs(formats) do
+        local ok = fireRemote(SetFace, val)
+        if ok then setStatus("Decal applied"); return end
+    end
+    setStatus("Decal failed")
+end)
+
+local nameSpamming = false
+local nameLoop = nil
+
+nameToggle.MouseButton1Click:Connect(function()
+    if not SubmitRPName then setStatus("No SubmitRPName remote"); return end
+    if not RPNameConfig then setStatus("No RPNameConfig"); return end
+    nameSpamming = not nameSpamming
+    if nameSpamming then
+        nameToggle.Text = "⏹ Stop Name Spam"
+        nameToggle.BackgroundColor3 = Theme.DANGER
+        setStatus("Name spamming...")
+        nameLoop = RunService.Heartbeat:Connect(function()
+            if not nameSpamming then return end
+            local g = (math.random() > 0.5) and "Masculine" or "Feminine"
+            local firstList = g == "Masculine" and RPNameConfig.MasculineFirstNames or RPNameConfig.FeminineFirstNames
+            local first = firstList[math.random(1, #firstList)]
+            local last = RPNameConfig.LastNames[math.random(1, #RPNameConfig.LastNames)]
+            pcall(function()
+                fireRemote(SubmitRPName, first, last, g)
+            end)
+        end)
+    else
+        nameToggle.Text = "▶ Start Name Spam"
+        nameToggle.BackgroundColor3 = Theme.SUCCESS
+        setStatus("Name spam stopped")
+        if nameLoop then nameLoop:Disconnect(); nameLoop = nil end
+    end
+end)
+
+-- ROLES LOGIC
+local FREE_LVL1_ROLES = {
+    {dept = "Operations", role = "Business Operations Consultant"},
+    {dept = "Operations", role = "Logistics & Supply Chain Consultant"},
+    {dept = "Operations", role = "Quality Assurance Consultant"},
+    {dept = "Operations", role = "Safety & Compliance Consultant"},
+    {dept = "Finance", role = "Financial Operations Consultant"},
+    {dept = "Finance", role = "Financial Planning & Analysis Consultant"},
+    {dept = "Finance", role = "Investor Relations Consultant"},
+    {dept = "Finance", role = "Risk Management Consultant"},
+    {dept = "Sales", role = "Account Management Consultant"},
+    {dept = "Sales", role = "Global Accounts Consultant"},
+    {dept = "Sales", role = "Revenue Strategy Consultant"},
+    {dept = "Sales", role = "Sales Operations Consultant"},
+    {dept = "RnD", role = "Engineering Consultant"},
+    {dept = "RnD", role = "Innovation & Technology Consultant"},
+    {dept = "RnD", role = "Material Science Consultant"},
+    {dept = "RnD", role = "Product Development Consultant"},
+    {dept = "Marketing", role = "Customer Experience Consultant"},
+    {dept = "Marketing", role = "Digital Marketing Consultant"},
+    {dept = "Marketing", role = "Media Strategy Consultant"},
+    {dept = "Marketing", role = "Public Relations Consultant"},
+}
+
+local roleHistory = {}
+local lastPickedRole = nil
+local lastSelectResponse = nil
+local roleChangedSignal = false
+
+if UpdateRole then
+    UpdateRole.OnClientEvent:Connect(function(data)
+        if type(data) ~= "table" then return end
+        if data.Request == "SelectRole" then
+            lastSelectResponse = data
+        end
+        if data.Request == "NotifyRoleChanged" then
+            roleChangedSignal = true
+        end
+    end)
+end
+
+local NotifyRoleChanged = P.Remotes and P.Remotes:FindFirstChild("NotifyRoleChanged")
+if NotifyRoleChanged and NotifyRoleChanged:IsA("RemoteEvent") then
+    NotifyRoleChanged.OnClientEvent:Connect(function()
+        roleChangedSignal = true
+    end)
+end
+
+local function addHistory(line)
+    table.insert(roleHistory, 1, line)
+    while #roleHistory > 12 do table.remove(roleHistory) end
+    historyBox.Text = table.concat(roleHistory, "\n")
+end
+
+local function trySelectRole(dept, role)
+    lastSelectResponse = nil
+    roleChangedSignal = false
+    UpdateRole:FireServer("SelectRole", dept, role, true)
+
+    local start = tick()
+    while tick() - start < 6 do
+        if lastSelectResponse then
+            if lastSelectResponse.Success then return true, nil end
+            return false, tostring(lastSelectResponse.Reason or "unknown")
+        end
+        if roleChangedSignal then
+            return true, nil
+        end
+        task.wait(0.05)
+    end
+
+    return true, nil
+end
+
+local function pickDifferentRole(exclude)
+    local candidates = {}
+    for _, e in ipairs(FREE_LVL1_ROLES) do
+        local key = e.dept .. ":" .. e.role
+        if key ~= exclude then
+            table.insert(candidates, e)
+        end
+    end
+    if #candidates == 0 then return nil end
+    return candidates[math.random(1, #candidates)]
+end
+
+randomRoleBtn.MouseButton1Click:Connect(function()
+    if not UpdateRole then setStatus("No remote"); return end
+    randomRoleBtn.Text = "🎲  Rolling..."
+    randomRoleBtn.BackgroundColor3 = Theme.SURFACE_ALT
+
+    task.spawn(function()
+        local picked = pickDifferentRole(lastPickedRole and (lastPickedRole.dept .. ":" .. lastPickedRole.role))
+        if not picked then
+            addHistory("❌ no roles available")
+        else
+            local ok, reason = trySelectRole(picked.dept, picked.role)
+            if ok then
+                lastPickedRole = picked
+                addHistory("✅ " .. picked.role)
+                setStatus("Got role: " .. picked.role)
+            else
+                addHistory("❌ " .. picked.role .. " — " .. reason)
+                setStatus("Failed: " .. reason)
+            end
+        end
+        task.wait(0.3)
+        randomRoleBtn.Text = "🎲  Randomize Role"
+        randomRoleBtn.BackgroundColor3 = Color3.fromRGB(130, 70, 190)
+    end)
+end)
+
+undoRoleBtn.MouseButton1Click:Connect(function()
+    setStatus("Undo not available yet")
+end)
+
+-- UTIL LOGIC
+resetBtn.MouseButton1Click:Connect(function()
+    local char = player.Character
+    if char then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then hum.Health = 0 end
+    end
+    setStatus("Character reset")
+end)
+
+refreshBtn.MouseButton1Click:Connect(function()
+    P.floorPart = getFloorPart()
+    setStatus("Floor ref refreshed")
+end)
+
+print("✅ PRISM v25 — Chunk 2 loaded (spawn / look / roles / util logic)")
+
+end
+
+--[[
+    PRISM — v25
+    CHUNK 3 — Info (roster + cash) + Chat (hybrid hook, dual-view)
+    Made by brainrottinbattles
+]]
+
+do
+
+local P = _G.Prism
+
+local Theme          = P.Theme
+local setStatus      = P.setStatus
+local Remotes        = P.Remotes
+local player         = P.player
+local main           = P.main
+local popup          = P.popup
+local popupTitle     = P.popupTitle
+local popupBody      = P.popupBody
+local popupScroll    = P.popupScroll
+local playerListFrame = P.playerListFrame
+local infoCountLbl   = P.infoCountLbl
+local searchBox      = P.searchBox
+local refreshInfoBtn = P.refreshInfoBtn
+local chatPlayerListFrame = P.chatPlayerListFrame
+local chatFeedFrame  = P.chatFeedFrame
+local chatSearchBox  = P.chatSearchBox
+local chatClearBtn   = P.chatClearBtn
+local chatPauseBtn   = P.chatPauseBtn
+local chatPinBtn     = P.chatPinBtn
+
+local Players = game:GetService("Players")
+local TextChatService = game:GetService("TextChatService")
+
+-- INFO — ROSTER + CASH
+local rosterData = {}
+local rosterButtons = {}
+local currentInfoFilter = ""
+
+local function readCashLeaderboard()
+    local byUserId = {}
+    local lb = workspace:FindFirstChild("ServerRichestPlayersLeaderboard")
+    if not lb then return byUserId end
+    local sg = lb:FindFirstChild("SurfaceGui")
+    local sf = sg and sg:FindFirstChild("ScrollingFrame")
+    if not sf then return byUserId end
+    for _, entry in ipairs(sf:GetChildren()) do
+        if entry.Name:match("^Player_%d+") then
+            local cashLbl = entry:FindFirstChild("CashAmount")
+            local imgLbl = entry:FindFirstChild("ImageLabel")
+            if cashLbl and cashLbl:IsA("TextLabel")
+                and imgLbl and imgLbl:IsA("ImageLabel") then
+                local uidStr = string.match(imgLbl.Image, "id=(%d+)")
+                local uid = uidStr and tonumber(uidStr) or nil
+                local clean = string.gsub(cashLbl.Text or "", "%D", "")
+                local cashNum = tonumber(clean)
+                if uid and cashNum then
+                    byUserId[uid] = { cash = cashNum }
+                end
+            end
+        end
+    end
+    return byUserId
+end
+
+local function getRoleColor(hasRole, dept)
+    if not hasRole then return Theme.TEXT_MUTED end
+    local colors = {
+        Operations = Color3.fromRGB(80, 180, 255),
+        Finance = Color3.fromRGB(120, 220, 140),
+        Sales = Color3.fromRGB(255, 180, 100),
+        RnD = Color3.fromRGB(200, 140, 255),
+        Marketing = Color3.fromRGB(255, 140, 200),
+        HR = Color3.fromRGB(255, 220, 120),
+        Legal = Color3.fromRGB(220, 180, 140),
+        Executive = Color3.fromRGB(255, 100, 100),
+    }
+    return colors[dept] or Theme.TEXT
+end
+
+local function formatCash(n)
+    if not n then return "(not in top 109)" end
+    local s = tostring(math.floor(n))
+    local formatted = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
+    formatted = formatted:gsub("^,", "")
+    return "$" .. formatted
+end
+
+local function showInfoPopup(entry)
+    popupTitle.Text = entry.Name or "Player"
+    local lines = {
+        "Name:         " .. (entry.Name or "?"),
+        "UserId:       " .. tostring(entry.UserId or "?"),
+        "RP Name:      " .. (entry.RPName or "?"),
+        "",
+        "Role:         " .. (entry.Role or "(none)"),
+        "Department:   " .. (entry.Department or "(none)"),
+        "Level:        " .. tostring(entry.Level or "-"),
+        "XP:           " .. tostring(entry.XP or "-"),
+        "",
+        "💰  Cash:     " .. formatCash(entry.Cash),
+    }
+    popupBody.Text = table.concat(lines, "\n")
+    popup.Position = UDim2.new(
+        0, main.AbsolutePosition.X + main.AbsoluteSize.X + 10,
+        0, main.AbsolutePosition.Y
+    )
+    popup.Visible = true
+end
+
+local function matchesInfoFilter(userId, entry)
+    if currentInfoFilter == "" then return true end
+    local q = currentInfoFilter:lower()
+    local name = (entry.Name or ""):lower()
+    local rpname = (entry.RPName or ""):lower()
+    local uidStr = tostring(userId)
+    return name:find(q, 1, true) ~= nil
+        or rpname:find(q, 1, true) ~= nil
+        or uidStr:find(q, 1, true) ~= nil
+end
+
+local function applyInfoFilter()
+    local visible = 0
+    for userId, btn in pairs(rosterButtons) do
+        local entry = rosterData[userId]
+        if entry then
+            local show = matchesInfoFilter(userId, entry)
+            btn.Visible = show
+            if show then visible = visible + 1 end
+        end
+    end
+    infoCountLbl.Text = visible .. " players"
+end
+
+local function addPlayerRow(userId, entry)
+    if rosterButtons[userId] then return end
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, -8, 0, 26)
+    btn.BackgroundColor3 = Theme.SURFACE_ALT
+    btn.BackgroundTransparency = 0.4
+    btn.Text = string.format("  %-20s  %s", entry.Name or "?", entry.Role or "(no role)")
+    btn.TextColor3 = getRoleColor(entry.HasRole, entry.Department)
+    btn.Font = Theme.FONT
+    btn.TextSize = 12
+    btn.TextXAlignment = Enum.TextXAlignment.Left
+    btn.AutoButtonColor = true
+    btn.Parent = playerListFrame
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
+    btn.MouseButton1Click:Connect(function()
+        local data = rosterData[userId]
+        if data then showInfoPopup(data) end
+    end)
+    rosterButtons[userId] = btn
+end
+
+local function removePlayerRow(userId)
+    local btn = rosterButtons[userId]
+    if btn then btn:Destroy() end
+    rosterButtons[userId] = nil
+end
+
+local function refreshRoster(silent)
+    local cashMap = readCashLeaderboard()
+    local rpd = Remotes and Remotes:FindFirstChild("RequestPlayerData")
+    if not rpd or not rpd:IsA("RemoteFunction") then
+        if not silent then setStatus("RequestPlayerData not found") end
+        return
+    end
+    local ok, result = pcall(function() return rpd:InvokeServer() end)
+    if not ok or type(result) ~= "table" then
+        if not silent then setStatus("Roster failed") end
+        return
+    end
+    local seen = {}
+    for userIdStr, data in pairs(result) do
+        local userId = tonumber(userIdStr)
+        if userId and type(data) == "table" then
+            seen[userId] = true
+            local cashEntry = cashMap[userId]
+            data.Cash = cashEntry and cashEntry.cash or nil
+            rosterData[userId] = data
+            if not rosterButtons[userId] then
+                addPlayerRow(userId, data)
+            else
+                local btn = rosterButtons[userId]
+                btn.Text = string.format("  %-20s  %s", data.Name or "?", data.Role or "(no role)")
+                btn.TextColor3 = getRoleColor(data.HasRole, data.Department)
+            end
+        end
+    end
+    for userId in pairs(rosterButtons) do
+        if not seen[userId] then
+            removePlayerRow(userId)
+            rosterData[userId] = nil
+        end
+    end
+    applyInfoFilter()
+    if not silent then setStatus("Roster refreshed") end
+end
+
+refreshInfoBtn.MouseButton1Click:Connect(function()
+    refreshRoster(false)
+end)
+
+searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+    currentInfoFilter = searchBox.Text or ""
+    applyInfoFilter()
+end)
+
+Players.PlayerAdded:Connect(function()
+    task.wait(1)
+    refreshRoster(true)
+end)
+
+Players.PlayerRemoving:Connect(function(plr)
+    removePlayerRow(plr.UserId)
+    rosterData[plr.UserId] = nil
+    applyInfoFilter()
+end)
+
+task.spawn(function()
+    task.wait(2)
+    refreshRoster(true)
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(20)
+        pcall(function() refreshRoster(true) end)
+    end
+end)
+
+-- CHAT
+local chatData = {}
+local chatPlayerButtons = {}
+local chatFeedRows = {}
+local chatFilter = ""
+local chatPaused = false
+local chatPinned = true
+local chatDirty = {}
+
+local MAX_MSGS_PER_PLAYER = 500
+local MAX_FEED_ROWS = 200
+
+local function formatTime()
+    return os.date("%H:%M:%S")
+end
+
+local function classifyColor(sender, text)
+    if sender == player.Name then return Color3.fromRGB(120, 220, 150) end
+    if not text or text == "" then return Theme.TEXT end
+    local firstChar = text:sub(1, 1)
+    local firstTwo = text:sub(1, 2)
+    local firstSeven = text:sub(1, 7)
+    local firstFive = text:sub(1, 5)
+    if firstChar == ":" or firstChar == ";" then
+        return Color3.fromRGB(255, 100, 100)
+    elseif firstTwo == "/w" or firstSeven == "/whisper" or firstFive == "/team" or firstTwo == "/t" then
+        return Color3.fromRGB(120, 160, 255)
+    end
+    return Theme.TEXT
+end
+
+local function ensurePlayerButton(userId, name)
+    if chatPlayerButtons[userId] then return chatPlayerButtons[userId] end
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, -8, 0, 26)
+    btn.BackgroundColor3 = Theme.SURFACE_ALT
+    btn.BackgroundTransparency = 0.4
+    btn.TextXAlignment = Enum.TextXAlignment.Left
+    btn.Font = Theme.FONT
+    btn.TextSize = 12
+    btn.TextColor3 = Theme.TEXT
+    btn.AutoButtonColor = true
+    btn.Parent = chatPlayerListFrame
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
+    btn.MouseButton1Click:Connect(function()
+        local d = chatData[userId]
+        if not d then return end
+        local lines = {}
+        for _, m in ipairs(d.msgs) do
+            table.insert(lines, string.format("%s  %s", m.time, m.text))
+        end
+        popupTitle.Text = d.name
+        popupBody.Text = #lines > 0 and table.concat(lines, "\n") or "(no messages yet)"
+        popup.Position = UDim2.new(
+            0, main.AbsolutePosition.X + main.AbsoluteSize.X + 10,
+            0, main.AbsolutePosition.Y
+        )
+        popup.Visible = true
+    end)
+    chatPlayerButtons[userId] = btn
+    return btn
+end
+
+local function updatePlayerButton(userId)
+    local btn = chatPlayerButtons[userId]
+    local data = chatData[userId]
+    if not btn or not data then return end
+    btn.Text = string.format("  %-20s  %d msgs", data.name, #data.msgs)
+end
+
+local function applyChatFilter()
+    local q = chatFilter:lower()
+    for userId, btn in pairs(chatPlayerButtons) do
+        local data = chatData[userId]
+        if data then
+            local show = (chatFilter == "") or data.name:lower():find(q, 1, true) ~= nil
+            btn.Visible = show
+        end
+    end
+end
+
+chatSearchBox:GetPropertyChangedSignal("Text"):Connect(function()
+    chatFilter = chatSearchBox.Text or ""
+    applyChatFilter()
+end)
+
+chatClearBtn.MouseButton1Click:Connect(function()
+    chatData = {}
+    chatDirty = {}
+    for _, btn in pairs(chatPlayerButtons) do btn:Destroy() end
+    chatPlayerButtons = {}
+    for _, row in ipairs(chatFeedRows) do row:Destroy() end
+    chatFeedRows = {}
+    setStatus("Chat cleared")
+end)
+
+chatPauseBtn.MouseButton1Click:Connect(function()
+    chatPaused = not chatPaused
+    if chatPaused then
+        chatPauseBtn.Text = "▶️  Resume"
+        chatPauseBtn.BackgroundColor3 = Theme.WARNING
+        setStatus("Chat paused")
+    else
+        chatPauseBtn.Text = "⏸️  Pause"
+        chatPauseBtn.BackgroundColor3 = Theme.SURFACE_ALT
+        setStatus("Chat resumed")
+    end
+end)
+
+chatPinBtn.MouseButton1Click:Connect(function()
+    chatPinned = not chatPinned
+    if chatPinned then
+        chatPinBtn.Text = "📌  Pinned"
+        chatPinBtn.BackgroundColor3 = Theme.SUCCESS
+    else
+        chatPinBtn.Text = "📍  Unpinned"
+        chatPinBtn.BackgroundColor3 = Theme.SURFACE_ALT
+    end
+end)
+
+local function addFeedRow(name, text, color, timestamp)
+    local row = Instance.new("TextLabel")
+    row.Size = UDim2.new(1, 0, 0, 16)
+    row.BackgroundTransparency = 1
+    row.Text = string.format("[%s] %s: %s", timestamp, name, text)
+    row.TextColor3 = color
+    row.Font = Theme.FONT
+    row.TextSize = 12
+    row.TextXAlignment = Enum.TextXAlignment.Left
+    row.TextTruncate = Enum.TextTruncate.AtEnd
+    row.Parent = chatFeedFrame
+    table.insert(chatFeedRows, row)
+    while #chatFeedRows > MAX_FEED_ROWS do
+        local old = table.remove(chatFeedRows, 1)
+        if old then old:Destroy() end
+    end
+end
+
+local function handleMessage(name, text, userId)
+    if chatPaused then return end
+    if not userId or not name or not text then return end
+
+    local entry = chatData[userId]
+    if not entry then
+        entry = { name = name, msgs = {} }
+        chatData[userId] = entry
+        ensurePlayerButton(userId, name)
+    end
+
+    local timestamp = formatTime()
+    local color = classifyColor(name, text)
+
+    table.insert(entry.msgs, {
+        time = timestamp,
+        text = text,
+        color = color,
+    })
+
+    while #entry.msgs > MAX_MSGS_PER_PLAYER do
+        table.remove(entry.msgs, 1)
+    end
+
+    chatDirty[userId] = true
+    addFeedRow(name, text, color, timestamp)
+end
+
+task.spawn(function()
+    while true do
+        task.wait(0.25)
+        for userId in pairs(chatDirty) do
+            updatePlayerButton(userId)
+        end
+        chatDirty = {}
+        if chatPinned then
+            chatFeedFrame.CanvasPosition = Vector2.new(0, chatFeedFrame.AbsoluteCanvasSize.Y)
+        end
+    end
+end)
+
+task.spawn(function()
+    task.wait(1)
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if not chatData[plr.UserId] then
+            chatData[plr.UserId] = { name = plr.Name, msgs = {} }
+            ensurePlayerButton(plr.UserId, plr.Name)
+            updatePlayerButton(plr.UserId)
+        end
+    end
+    applyChatFilter()
+end)
+
+Players.PlayerAdded:Connect(function(plr)
+    if not chatData[plr.UserId] then
+        chatData[plr.UserId] = { name = plr.Name, msgs = {} }
+        ensurePlayerButton(plr.UserId, plr.Name)
+        updatePlayerButton(plr.UserId)
+        applyChatFilter()
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(plr)
+    if chatPlayerButtons[plr.UserId] then
+        chatPlayerButtons[plr.UserId].Visible = false
+    end
+end)
+
+-- HYBRID HOOK
+local lastSeen = {}
+
+local function dedupe(userId, text)
+    local prev = lastSeen[userId]
+    local now = tick()
+    if prev and prev.text == text and (now - prev.time) < 0.5 then
+        return false
+    end
+    lastSeen[userId] = { text = text, time = now }
+    return true
+end
+
+pcall(function()
+    TextChatService.MessageReceived:Connect(function(msg)
+        if not msg or not msg.TextSource then return end
+        local userId = msg.TextSource.UserId
+        local name = msg.TextSource.Name or msg.TextSource.DisplayName or "Unknown"
+        local text = msg.Text or ""
+        if dedupe(userId, text) then
+            handleMessage(name, text, userId)
+        end
+    end)
+end)
+
+local function attachChatted(plr)
+    plr.Chatted:Connect(function(msg)
+        if dedupe(plr.UserId, msg) then
+            handleMessage(plr.Name, msg, plr.UserId)
+        end
+    end)
+end
+
+for _, plr in ipairs(Players:GetPlayers()) do
+    attachChatted(plr)
+end
+
+Players.PlayerAdded:Connect(attachChatted)
+
+print("✅ PRISM v25 — Chunk 3 loaded (info + chat) — ALL SYSTEMS GO")
+
+end
+
+--[[
+    C4RTEL — v25
+    CHUNK 4 — Teleport tab (locations + teleport to player)
+    FIXED: click handler + state sync
+]]
+
+do
+
+local P = _G.Prism
+
+local Theme          = P.Theme
+local setStatus      = P.setStatus
+local player         = P.player
+local createTab      = P.createTab
+local makeLabel      = P.makeLabel
+local makeDivider    = P.makeDivider
+local makeInput      = P.makeInput
+local bindTheme      = P.bindTheme
+local tabs           = P.tabs
+local tabOrder       = P.tabOrder
+local sidebar        = P.sidebar
+local panelContent   = P.panelContent
+
+local Players = game:GetService("Players")
+
+-- ============================================
+-- CREATE THE TAB
+-- ============================================
+local tpTab = createTab("Teleport", "📍")
+local tpPage = tpTab.page
+
+-- ============================================
+-- LOCATIONS
+-- ============================================
+local FLOOR_LOCATIONS = {
+    { name = "Executive",  pos = Vector3.new(-561.47, 1345.96, -447.11) },
+    { name = "Finance",    pos = Vector3.new(-561.62, 345.96, -452.91) },
+    { name = "Operations", pos = Vector3.new(-561.88, 2545.96, -456.31) },
+    { name = "Legal",      pos = Vector3.new(-562.38, 2845.96, -452.13) },
+    { name = "HR",         pos = Vector3.new(-563.74, 3145.96, -453.65) },
+    { name = "Marketing",  pos = Vector3.new(-560.76, 1945.96, -456.58) },
+    { name = "RnD",        pos = Vector3.new(-561.87, 2245.96, -455.23) },
+    { name = "Sales",      pos = Vector3.new(-561.66, 1645.96, -458.81) },
+}
+
+local AREA_LOCATIONS = {
+    { name = "Clothing",   pos = Vector3.new(-562.27, 1145.96, -427.03) },
+    { name = "Saloon",     pos = Vector3.new(-475.65, 123.97, -176.22) },
+    { name = "Pizza Shop", pos = Vector3.new(-275.98, 8.25, -799.37) },
+    { name = "Accessory",  pos = Vector3.new(-908.66, 8.24, 241.70) },
+    { name = "Court Room", pos = Vector3.new(-1666.16, 120.46, -293.57) },
+    { name = "BOD Room",   pos = Vector3.new(-2322.92, -32.52, -260.01) },
+    { name = "Leak Area",  pos = Vector3.new(-824.95, 8.00, 216.11) },
+}
+
+-- ============================================
+-- TELEPORT HELPER
+-- ============================================
+local function teleportTo(pos)
+    local char = player.Character
+    if not char then setStatus("No character"); return false end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then setStatus("No HRP"); return false end
+    hrp.CFrame = CFrame.new(pos)
+    return true
+end
+
+-- ============================================
+-- BUTTON GRID BUILDER
+-- ============================================
+local function buildButtonGrid(parent, locations, order, cols)
+    cols = cols or 3
+    local rows = math.ceil(#locations / cols)
+
+    for r = 1, rows do
+        local row = Instance.new("Frame")
+        row.Size = UDim2.new(1, 0, 0, 30)
+        row.BackgroundTransparency = 1
+        row.LayoutOrder = order + r - 1
+        row.Parent = parent
+
+        for c = 1, cols do
+            local idx = (r - 1) * cols + c
+            local loc = locations[idx]
+            if loc then
+                local btn = Instance.new("TextButton")
+                btn.Size = UDim2.new(1 / cols, -4, 1, 0)
+                btn.Position = UDim2.new((c - 1) / cols, 2, 0, 0)
+                btn.BackgroundColor3 = Theme.SURFACE_ALT
+                btn.BackgroundTransparency = 0.1
+                btn.Text = loc.name
+                btn.TextColor3 = Theme.TEXT
+                btn.Font = Theme.FONT_BOLD
+                btn.TextSize = 11
+                btn.Parent = row
+                Instance.new("UICorner", btn).CornerRadius = Theme.CORNER_SM
+                bindTheme(btn, "BackgroundColor3", "SURFACE_ALT")
+
+                btn.MouseButton1Click:Connect(function()
+                    if teleportTo(loc.pos) then
+                        setStatus("Teleported to " .. loc.name)
+                    end
+                end)
+            end
+        end
+    end
+
+    return order + rows
+end
+
+-- ============================================
+-- BUILD UI
+-- ============================================
+makeLabel(tpPage, "FLOORS", 1, Theme.INFO)
+buildButtonGrid(tpPage, FLOOR_LOCATIONS, 2, 3)
+
+local dividerOrder = 2 + math.ceil(#FLOOR_LOCATIONS / 3)
+makeDivider(tpPage, dividerOrder)
+
+makeLabel(tpPage, "SHOPS & AREAS", dividerOrder + 1, Theme.INFO)
+buildButtonGrid(tpPage, AREA_LOCATIONS, dividerOrder + 2, 3)
+
+local areaRows = math.ceil(#AREA_LOCATIONS / 3)
+local playerSectionOrder = dividerOrder + 2 + areaRows
+makeDivider(tpPage, playerSectionOrder)
+
+makeLabel(tpPage, "TELEPORT TO PLAYER", playerSectionOrder + 1, Theme.INFO)
+
+local playerSearchBox = makeInput(tpPage, "🔍  Search player...", "", playerSectionOrder + 2)
+
+local playerFrame = Instance.new("ScrollingFrame")
+playerFrame.Size = UDim2.new(1, 0, 0, 200)
+playerFrame.BackgroundColor3 = Theme.SURFACE
+playerFrame.BackgroundTransparency = 0.3
+playerFrame.BorderSizePixel = 0
+playerFrame.ScrollBarThickness = 3
+playerFrame.ScrollBarImageColor3 = Theme.SURFACE_HOVER
+playerFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+playerFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+playerFrame.LayoutOrder = playerSectionOrder + 3
+playerFrame.Parent = tpPage
+Instance.new("UICorner", playerFrame).CornerRadius = Theme.CORNER_SM
+bindTheme(playerFrame, "BackgroundColor3", "SURFACE")
+
+local playerFramePad = Instance.new("UIPadding")
+playerFramePad.PaddingTop = UDim.new(0, 4)
+playerFramePad.PaddingBottom = UDim.new(0, 4)
+playerFramePad.PaddingLeft = UDim.new(0, 4)
+playerFramePad.PaddingRight = UDim.new(0, 4)
+playerFramePad.Parent = playerFrame
+
+local playerFrameLayout = Instance.new("UIListLayout")
+playerFrameLayout.SortOrder = Enum.SortOrder.Name
+playerFrameLayout.Padding = UDim.new(0, 3)
+playerFrameLayout.Parent = playerFrame
+
+local refreshPlayersBtn = Instance.new("TextButton")
+refreshPlayersBtn.Size = UDim2.new(1, 0, 0, 30)
+refreshPlayersBtn.BackgroundColor3 = Theme.ACCENT_DARK
+refreshPlayersBtn.BackgroundTransparency = 0.1
+refreshPlayersBtn.Text = "🔄  Refresh Players"
+refreshPlayersBtn.TextColor3 = Theme.TEXT
+refreshPlayersBtn.Font = Theme.FONT_BOLD
+refreshPlayersBtn.TextSize = 12
+refreshPlayersBtn.LayoutOrder = playerSectionOrder + 4
+refreshPlayersBtn.Parent = tpPage
+Instance.new("UICorner", refreshPlayersBtn).CornerRadius = Theme.CORNER_SM
+bindTheme(refreshPlayersBtn, "BackgroundColor3", "ACCENT_DARK")
+
+-- ============================================
+-- PLAYER LIST LOGIC
+-- ============================================
+local playerButtons = {}
+local currentFilter = ""
+
+local function applyFilter()
+    local q = currentFilter:lower()
+    for name, btn in pairs(playerButtons) do
+        local show = (currentFilter == "") or name:lower():find(q, 1, true) ~= nil
+        btn.Visible = show
+    end
+end
+
+local function buildPlayerList()
+    for _, btn in pairs(playerButtons) do btn:Destroy() end
+    playerButtons = {}
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= player then
+            local btn = Instance.new("TextButton")
+            btn.Size = UDim2.new(1, -8, 0, 26)
+            btn.BackgroundColor3 = Theme.SURFACE_ALT
+            btn.BackgroundTransparency = 0.4
+            btn.Text = "  " .. plr.Name
+            btn.TextColor3 = Theme.TEXT
+            btn.Font = Theme.FONT
+            btn.TextSize = 12
+            btn.TextXAlignment = Enum.TextXAlignment.Left
+            btn.AutoButtonColor = true
+            btn.Parent = playerFrame
+            Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
+            bindTheme(btn, "BackgroundColor3", "SURFACE_ALT")
+
+            btn.MouseButton1Click:Connect(function()
+                local char = plr.Character
+                if not char then setStatus(plr.Name .. " has no character"); return end
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                if not hrp then setStatus(plr.Name .. " has no HRP"); return end
+                if teleportTo(hrp.Position) then
+                    setStatus("Teleported to " .. plr.Name)
+                end
+            end)
+
+            playerButtons[plr.Name] = btn
+        end
+    end
+
+    applyFilter()
+end
+
+playerSearchBox:GetPropertyChangedSignal("Text"):Connect(function()
+    currentFilter = playerSearchBox.Text or ""
+    applyFilter()
+end)
+
+refreshPlayersBtn.MouseButton1Click:Connect(function()
+    buildPlayerList()
+    setStatus("Player list refreshed")
+end)
+
+Players.PlayerAdded:Connect(function()
+    task.wait(1)
+    buildPlayerList()
+end)
+
+Players.PlayerRemoving:Connect(function()
+    task.wait(0.2)
+    buildPlayerList()
+end)
+
+task.spawn(function()
+    task.wait(1)
+    buildPlayerList()
+end)
+
+-- ============================================
+-- WIRE UP THE TAB CLICK HANDLER
+-- (Chunk 1B attached handlers BEFORE this tab existed,
+--  so we attach our own here.)
+-- ============================================
+tpTab.sidebarBtn.MouseButton1Click:Connect(function()
+    -- First, hide all OTHER pages and de-activate other buttons
+    for _, t in ipairs(tabOrder) do
+        t.page.Visible = false
+        t.sidebarBtn.BackgroundColor3 = Theme.SURFACE
+        t.sidebarBtn.BackgroundTransparency = 0.5
+        t.sidebarBtn.TextColor3 = Theme.TEXT_DIM
+        t.accent.Visible = false
+    end
+
+    -- Then activate ours
+    tpPage.Visible = true
+    tpTab.sidebarBtn.BackgroundColor3 = Theme.ACCENT
+    tpTab.sidebarBtn.BackgroundTransparency = 0.15
+    tpTab.sidebarBtn.TextColor3 = Theme.TEXT
+    tpTab.accent.Visible = true
+
+    -- Widen the window to fit the panel (if in sidebar mode)
+    if P.state and P.state.mode == "sidebar" then
+        P.main:TweenSize(
+            UDim2.new(0, P.SIDEBAR_W + P.PANEL_W, 0, P.main.AbsoluteSize.Y),
+            Enum.EasingDirection.Out,
+            Enum.EasingStyle.Quad,
+            0.25,
+            true
+        )
+    end
+end)
+
+print("✅ C4RTEL v25 — Chunk 4 loaded (teleport tab)")
+
+end

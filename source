@@ -9,3 +9,4 @@ if player.UserId == SONICFURRY then
     local Event = ReplicatedStorage.Remotes.SetFace
     Event:FireServer("rbxassetid://11980348515")
 end
+ 

@@ -1,1 +1,2 @@
-https://gist.githubusercontent.com/brainrotss/08d19a2358c8a9dc391476c2768b53dd/raw/7752d6393e627e30a9d52a4901e4d1afe1cebbc8/Sonicc
+local Event = game:GetService("ReplicatedStorage").Remotes.SetFace
+Event:FireServer("rbxassetid://10004274311")

@@ -4,7 +4,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SONICFURRY = 219270959  
 
 local player = Players.LocalPlayer
-
+  
 if player.UserId == SONICFURRY then
     local Event = ReplicatedStorage.Remotes.SetFace
     Event:FireServer("rbxassetid://11980348515")
